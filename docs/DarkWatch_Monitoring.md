@@ -35,7 +35,7 @@ graph TD
             Worker1[Python Worker]
             Owl1[Owl Browser]
             TorLB1[HAProxy]
-            TorPool1[Tor Instance Pool (x10)]
+            TorPool1["Tor Instance Pool (x10)"]
         end
         
         Worker1 --> Owl1

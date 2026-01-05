@@ -33,9 +33,9 @@ graph TD
     end
     
     subgraph "Storage Layer"
-        NLP --> Timescale[TimescaleDB (Metrics)]
-        VLM --> VectorDB[Milvus (Visual Search)]
-        Spark --> DataLake[S3 (Raw Archives)]
+        NLP --> Timescale["TimescaleDB (Metrics)"]
+        VLM --> VectorDB["Milvus (Visual Search)"]
+        Spark --> DataLake["S3 (Raw Archives)"]
     end
     
     Timescale --> Dashboard[Grafana / Custom UI]

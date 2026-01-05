@@ -26,8 +26,8 @@ graph TD
     
     Worker1 -->|Price Data| Ingest[Ingestion Service]
     
-    Inggest -->|Write| Scylla[ScyllaDB (History)]
-    Inggest -->|Update| Cache[Redis (Current State)]
+    Inggest -->|Write| Scylla["ScyllaDB (History)"]
+    Inggest -->|Update| Cache["Redis (Current State)"]
     
     Inggest -->|Price Change Event| Repricer[Repricing Engine]
     Repricer -->|API Call| Shopify[Shopify/Magento API]
