@@ -5600,8 +5600,6 @@ As an open-source project, monetization helps sustainability:
 
 *Built with Owl Browser | Powered by Open Source*
 
-*For questions and support: [Discord](https://discord.gg/crawlforge)*
-
 ---
 
 ## Disclaimer
