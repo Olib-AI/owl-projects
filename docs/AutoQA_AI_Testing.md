@@ -621,7 +621,7 @@ from pathlib import Path
 from typing import Any, Protocol, TypedDict
 
 from owl_browser import Browser, Page, RemoteConfig
-from owl_browser.exceptions import ElementNotFoundError, TimeoutError as OwlTimeoutError
+from owl_browser.exceptions import ElementNotFoundError, CommandTimeoutError as OwlTimeoutError
 
 from autoqa.parser.dsl_parser import (
     DSLParser,

@@ -154,41 +154,47 @@ Redis maintains current-state caches for sub-millisecond price lookups in repric
 
 ---
 
-## AutoQA: The Self-Healing, AI-Driven Test Automation Suite
+## AutoQA: Deterministic Self-Healing Test Automation with ML Assertions
 
 ### Purpose and Goals
 
-AutoQA reimagines end-to-end test automation for the modern development era. Traditional Selenium and Playwright tests suffer from a fundamental fragility: they depend on specific CSS selectors and XPath expressions that break whenever the UI evolves. Development teams spend more time maintaining tests than writing new ones, leading many organizations to reduce test coverage or abandon E2E testing entirely.
+AutoQA delivers enterprise-grade end-to-end test automation without LLM or AI dependencies for core assertions. Traditional Selenium and Playwright tests suffer from fundamental fragility: they depend on specific CSS selectors and XPath expressions that break whenever the UI evolves. Development teams spend more time maintaining tests than writing new ones, leading many organizations to reduce test coverage or abandon E2E testing entirely.
 
-AutoQA replaces brittle, code-heavy test scripts with resilient, natural language test definitions. Tests describe user intent (e.g., "Click the login button") rather than implementation details (e.g., "Click element #btn-login-primary"). When the UI changes, AutoQA's AI-native engine automatically locates the correct elements, enabling tests to self-heal without human intervention.
+AutoQA replaces brittle, code-heavy test scripts with a natural language YAML DSL that humans can read and write without programming expertise. Tests describe user intent (e.g., "click the login button") rather than implementation details (e.g., "click element #btn-login-primary"). When selectors break, AutoQA applies deterministic self-healing strategies—not probabilistic AI—ensuring predictable, reproducible test behavior. Enterprise visual regression capabilities with version tracking enable comparing test runs over time, detecting layout drift and UI regressions across releases.
 
 ### Key Features and Capabilities
 
-The zero-maintenance testing model represents AutoQA's core value proposition. Tests adapt to UI changes automatically, with the self-healing engine learning from successful adaptations to improve future runs. Healing events are logged and reported, enabling teams to understand how their tests are adapting and identify UI changes that may need attention.
+The comprehensive DSL provides 40+ actions covering all browser interactions: navigation (`navigate`, `back`, `forward`, `refresh`), element operations (`click`, `type`, `clear`, `hover`, `scroll`), form handling (`select_option`, `check`, `uncheck`), and specialized operations (`drag_and_drop`, `upload_file`, `execute_script`). The 24 assertion operators support both simple comparisons (`equals`, `contains`, `matches`) and complex validations (`json_path`, `json_schema`, `is_sorted`).
 
-Generative testing through "Exploratory Agents" enables automated discovery of bugs that weren't explicitly tested. These agents navigate applications with goal-directed behavior, identifying unexpected states, JavaScript errors, and accessibility violations. Visual regression testing goes beyond pixel comparison to semantic understanding, detecting broken layouts and misaligned elements while ignoring intentional style changes.
+Self-healing employs 10 deterministic strategies that execute without AI: attribute-based healing using data-testid, aria-label, name, and id attributes; structural healing using sibling relationships and parent-child hierarchies; text-based healing matching visible text and placeholder content. Each healing event is logged with the strategy used and confidence score, enabling audit trails and quality gates.
 
-The YAML-based DSL supports sophisticated test flows including variables, loops, conditionals, data injection from external sources, and reusable test fragments. Network assertions verify API calls, console assertions catch JavaScript errors, and screenshot checkpoints document test execution for debugging and compliance.
+ML-powered assertions extend validation beyond DOM inspection: OCR text extraction (EasyOCR) validates text in images and canvas elements; color analysis detects brand compliance and contrast ratios; layout detection identifies misaligned elements and broken grids; accessibility checks validate WCAG compliance including color contrast and semantic structure.
+
+Enterprise visual regression goes beyond pixel comparison: anti-aliasing tolerance prevents false positives from font rendering differences; automatic masking excludes dynamic content (timestamps, ads, user data); device-specific baselines maintain separate references for desktop, tablet, and mobile; HTML diff reports highlight exact DOM changes when visual differences are detected.
+
+Version tracking maintains snapshot history across test runs, enabling diff analysis between any two versions and automated change detection that flags unexpected UI modifications. CI/CD generators produce ready-to-use pipeline configurations for GitHub Actions, GitLab CI, Jenkins, Azure DevOps, and CircleCI.
 
 ### Owl Browser Integration
 
-AutoQA leverages Owl Browser's AI capabilities to fundamentally change how elements are located during test execution. The "Find Element" capability accepts natural language descriptions and returns candidate elements with confidence scores. When a traditional selector fails, AutoQA falls back to AI-based element finding, automatically updating its selector cache with the healed selector for future runs.
+AutoQA uses the owl-browser SDK exclusively for all browser automation, connecting to remote browser instances rather than managing local browser installations. This architecture eliminates the overhead of browser binary management, version synchronization, and resource-intensive local execution.
 
-Visual assertions use Owl Browser's VLM to verify page state through natural language queries like "I see the shipping address form with all required fields." This enables testing of visual conditions that would be extremely difficult to express as selector-based assertions. The ability to detect and solve CAPTCHAs ensures tests aren't blocked by security challenges in staging environments.
+The SDK provides semantic selectors that accept natural language element descriptions, returning candidate elements with confidence scores. When explicit selectors fail and deterministic healing strategies are exhausted, semantic selection serves as the final fallback. Video recording captures complete test execution for debugging and compliance documentation. Screenshots can be taken at any step, supporting both reference capture and visual assertion validation.
 
-Video recording captures complete test execution for debugging, while console and network logging provide full observability into application behavior during tests. Profile management enables tests to run with specific browser configurations, cached credentials, and localStorage state.
+Network log capture records all HTTP requests and responses during test execution, enabling assertions on API calls, response times, and payload content. Browser contexts provide isolation between tests, preventing state leakage and enabling parallel execution.
 
 ### Target Users and Use Cases
 
-QA teams adopt AutoQA to reduce test maintenance burden while increasing coverage. The natural language DSL enables non-developers to write and maintain tests, democratizing test automation beyond the engineering team. DevOps teams integrate AutoQA into CI/CD pipelines, running comprehensive E2E suites on every deployment.
+QA teams adopt AutoQA to reduce test maintenance burden while increasing coverage. The natural language YAML DSL enables non-developers to write and maintain tests, democratizing test automation beyond the engineering team. DevOps teams integrate AutoQA into CI/CD pipelines using the generated configurations, running comprehensive E2E suites on every deployment.
 
-Product managers use the exploratory testing capabilities to validate user flows without writing formal test cases. Accessibility teams leverage the AI capabilities to identify usability issues that traditional automated tests miss. Regulated industries benefit from the detailed execution logs and video recordings that demonstrate testing compliance.
+Product managers validate user flows by reading test definitions that describe business scenarios in plain language. Accessibility teams leverage the built-in WCAG checks and color contrast analysis to identify compliance issues automatically. Regulated industries benefit from version tracking, detailed execution logs, and video recordings that demonstrate testing compliance across releases.
 
 ### Technical Highlights
 
-The architecture is designed for high-throughput CI/CD integration, with a Kubernetes-based execution grid that scales automatically based on test volume. The DSL parser provides complete Pydantic validation of test definitions, catching configuration errors before execution. The variable resolution engine supports environment variables, Vault integration for secrets, randomized values, and data injection from CSV, JSON, or YAML files.
+The implementation comprises approximately 10,000 lines of production Python code, built on Python 3.12+ with strict typing throughout. FastAPI provides the REST gateway for remote execution and integration with external systems. Pydantic validates all test definitions, catching configuration errors before execution begins.
 
-The SmartStepExecutor implements a four-stage fallback chain: cached selectors from previous healed runs, explicit CSS selectors, XPath expressions, and finally AI-based element finding. Healing events include confidence scores, enabling quality gates that fail tests when healing confidence is low. Complete implementations include the test runner, assertion engine, and reporting system, all type-safe and production-ready.
+The CLI exposes six primary commands: `run` executes test suites with configurable parallelism and reporting; `validate` checks YAML syntax and schema compliance without execution; `history` displays past test runs with filtering and search; `diff` compares two test runs highlighting changes in results, timing, and healing events; `ci` generates pipeline configurations for the target CI/CD platform; `server` launches the FastAPI gateway for remote execution.
+
+ML assertions are powered by opencv-python for image processing and comparison, easyocr for text extraction from visual content, and scikit-image for structural similarity and perceptual hashing. These dependencies are optional, loaded only when ML assertions are used, keeping the base installation lightweight. The complete implementation maintains zero LLM dependencies for assertion logic, ensuring deterministic, reproducible test results.
 
 ---
 

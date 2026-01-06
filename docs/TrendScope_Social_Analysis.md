@@ -73,7 +73,7 @@ from enum import Enum, auto
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from owl_browser import Browser, RemoteConfig, ProxyConfig
+from owl_browser import Browser, RemoteConfig, ProxyConfig, ExtractionTemplate
 
 if TYPE_CHECKING:
     from owl_browser import Page
@@ -666,9 +666,14 @@ class ProxyEndpoint:
 
     def to_proxy_config(self) -> ProxyConfig:
         """Convert to Owl Browser ProxyConfig."""
+        from urllib.parse import urlparse
+        parsed = urlparse(self.url)
         return ProxyConfig(
-            url=self.url,
             type=self.proxy_type.value,
+            host=parsed.hostname or "",
+            port=parsed.port or 80,
+            username=parsed.username,
+            password=parsed.password,
         )
 
 

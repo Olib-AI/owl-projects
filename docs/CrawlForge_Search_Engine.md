@@ -355,10 +355,9 @@ class DomainBlockedError(NonRetryableError):
 # SDK Exception Mapping
 SDK_EXCEPTION_MAP: Final[dict[str, type[CrawlerError]]] = {
     "ElementNotFoundError": NonRetryableError,
-    "CaptchaDetectedError": CaptchaBlockedError,
     "FirewallError": FirewallBlockedError,
-    "TimeoutError": NetworkTimeoutError,
-    "ProxyConnectionError": ProxyError,
+    "CommandTimeoutError": NetworkTimeoutError,
+    "BrowserInitializationError": ProxyError,
 }
 
 
@@ -397,8 +396,9 @@ from owl_browser import Browser, RemoteConfig, ProxyConfig as OwlProxyConfig
 from owl_browser import NetworkRule, ExtractionTemplate
 from owl_browser.exceptions import (
     ElementNotFoundError,
-    CaptchaDetectedError,
+    ActionError,
     FirewallError,
+    CommandTimeoutError,
 )
 
 from .types import (
@@ -851,9 +851,13 @@ class SmartCrawler:
                         video_path=video_path,
                     )
 
-            except CaptchaDetectedError as e:
-                last_error = CaptchaBlockedError(str(e), url=url)
-                logger.warning(f"CAPTCHA blocked on {url}: {e}")
+            except ActionError as e:
+                if e.status == "captcha_detected":
+                    last_error = CaptchaBlockedError(str(e), url=url)
+                    logger.warning(f"CAPTCHA blocked on {url}: {e}")
+                else:
+                    last_error = map_sdk_exception(e)
+                    logger.warning(f"Action failed on {url}: {e}")
 
             except FirewallError as e:
                 # Non-retryable: site has blocked us permanently
@@ -872,7 +876,7 @@ class SmartCrawler:
                 last_error = map_sdk_exception(e)
                 logger.warning(f"Element not found on {url}: {e}")
 
-            except asyncio.TimeoutError:
+            except CommandTimeoutError:
                 last_error = NetworkTimeoutError(
                     f"Timeout after {self.config.default_timeout}ms",
                     url=url,

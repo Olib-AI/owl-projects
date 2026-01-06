@@ -50,7 +50,7 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import TypedDict
 
-from owl_browser import Browser, RemoteConfig, ProxyConfig, Page
+from owl_browser import Browser, RemoteConfig, ProxyConfig, Page, ExtractionTemplate
 
 
 class BuyBoxStatus(StrEnum):
@@ -128,18 +128,7 @@ class AmazonScraper:
                 await page.wait_for_network_idle(idle_time=2000)
 
             # Use AI extraction for robust data capture across layout variants
-            raw_data = await page.extract_json(template={
-                "title": "product title (main heading)",
-                "price": "current price amount (number only, no currency symbol)",
-                "list_price": "original/list price if shown struck through",
-                "currency": "currency code (USD, GBP, EUR)",
-                "availability": "stock status text",
-                "seller_name": "sold by / ships from seller name",
-                "rating": "star rating out of 5",
-                "review_count": "number of customer reviews",
-                "is_prime": "whether Prime delivery is available (true/false)",
-                "delivery_date": "estimated delivery date text"
-            })
+            raw_data = await page.extract_json(template=ExtractionTemplate.AMAZON_PRODUCT)
 
             # Buy Box detection requires specific element analysis
             buy_box_status = await self._detect_buy_box_status(page)
@@ -259,16 +248,7 @@ class AmazonScraper:
 
             for page_num in range(max_pages):
                 # Extract current page results using AI
-                page_results = await page.extract_json(template={
-                    "products": [{
-                        "asin": "ASIN identifier from data attribute or link",
-                        "title": "product title text",
-                        "price": "price amount (number only)",
-                        "rating": "star rating number",
-                        "review_count": "number of reviews",
-                        "is_sponsored": "whether marked as Sponsored (true/false)"
-                    }]
-                })
+                page_results = await page.extract_json(template=ExtractionTemplate.AUTO)
 
                 products = page_results.get("products", [])
                 for idx, product in enumerate(products):
@@ -412,16 +392,7 @@ class WalmartScraper:
                 raise RuntimeError(f"Bot detection triggered for item {item_id}")
 
             # AI-powered extraction handles layout variations
-            raw_data = await page.extract_json(template={
-                "title": "product title/name",
-                "price": "current selling price (number only)",
-                "was_price": "original/was price if shown",
-                "unit_price": "price per unit if displayed (e.g., '$0.05/oz')",
-                "availability": "stock status (In stock, Out of stock, Limited stock)",
-                "fulfillment": "fulfillment options available (Shipping, Pickup, Delivery)",
-                "rating": "average star rating",
-                "review_count": "total number of reviews"
-            })
+            raw_data = await page.extract_json(template=ExtractionTemplate.AUTO)
 
             # Extract UPC from page metadata
             upc = await self._extract_upc(page)
@@ -528,17 +499,7 @@ class WalmartScraper:
             await page.wait_for_network_idle(idle_time=2000)
 
             # Extract store list
-            stores_data = await page.extract_json(template={
-                "stores": [{
-                    "store_id": "store number or ID",
-                    "store_name": "store name",
-                    "address": "full store address",
-                    "in_stock": "whether item is in stock (true/false)",
-                    "quantity": "quantity available if shown",
-                    "price": "price at this store if different",
-                    "pickup_available": "whether pickup is available (true/false)"
-                }]
-            })
+            stores_data = await page.extract_json(template=ExtractionTemplate.AUTO)
 
             for store in stores_data.get("stores", []):
                 results.append(StoreAvailability(
@@ -658,18 +619,7 @@ class TargetScraper:
                 raise RuntimeError(f"Bot detection triggered for TCIN {tcin}")
 
             # Multi-tier pricing extraction
-            raw_data = await page.extract_json(template={
-                "title": "product title/name",
-                "price": "current displayed price (number only)",
-                "reg_price": "regular price if different from current",
-                "sale_price": "sale price if on sale",
-                "circle_price": "Target Circle member price if shown",
-                "availability": "stock status text",
-                "shipping": "shipping availability (true/false)",
-                "same_day": "same day delivery available (true/false)",
-                "pickup": "order pickup available (true/false)",
-                "drive_up": "drive up available (true/false)"
-            })
+            raw_data = await page.extract_json(template=ExtractionTemplate.AUTO)
 
             # Extract identifiers
             dpci = await self._extract_dpci(page)
@@ -818,26 +768,15 @@ class GenericProductScraper:
             # Detect website type for optimized extraction
             site_type = await page.detect_website_type()
 
-            # Build extraction template
-            base_template = {
-                "title": "main product title or name",
-                "price": "current selling price (number only, no currency)",
-                "currency": "currency code (USD, EUR, GBP, etc.)",
-                "original_price": "original/list/was price if discounted",
-                "availability": "stock status (In Stock, Out of Stock, etc.)",
-                "seller": "seller or merchant name",
-                "brand": "product brand name",
-                "sku": "SKU or product code",
-                "description": "short product description (first 500 chars)",
-                "rating": "average rating out of 5",
-                "review_count": "total number of reviews"
-            }
+            # Primary extraction via AI using auto-detection
+            raw_data = await page.extract_json(template=ExtractionTemplate.AUTO)
 
+            # Handle custom fields using direct AI extraction
             if custom_fields:
-                base_template.update(custom_fields)
-
-            # Primary extraction via AI
-            raw_data = await page.extract_json(template=base_template)
+                for field_name, description in custom_fields.items():
+                    if field_name not in raw_data:
+                        result = await page.ai_extract(description)
+                        raw_data[field_name] = result.content
 
             # Fallback to ai_extract for missing critical fields
             if not raw_data.get("title"):
@@ -1837,12 +1776,7 @@ class GeoLocationManager:
                         await page.solve_captcha(max_attempts=2)
 
                     # Extract price data
-                    data = await page.extract_json(template={
-                        "price": "current price (number only)",
-                        "currency": "currency code",
-                        "availability": "stock status",
-                        "fulfillment": "available fulfillment options"
-                    })
+                    data = await page.extract_json(template=ExtractionTemplate.AUTO)
 
                     fulfillment = data.get("fulfillment", "")
                     options = []

@@ -764,13 +764,13 @@ class TorCrawler:
             type="socks5",
             host=tor_instance.socks_host,
             port=tor_instance.socks_port,
+            stealth=True,
+            timezone_override="UTC",
         )
 
         # CRITICAL: UTC timezone for all Tor users (anonymity best practice)
         page = await self._browser.new_page(
             proxy=proxy_config,
-            stealth=True,
-            timezone_override="UTC",
         )
 
         try:
