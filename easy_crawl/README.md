@@ -52,6 +52,16 @@ This project demonstrates the **"Browser-as-Backend"** architecture:
 *   **Backend:** Python FastAPI (Lightweight orchestration)
 *   **Frontend:** React + Tailwind CSS (Modern, responsive UI)
 
+## 🤖 Agentic Extensibility
+
+Beyond simple scraping and crawling, Easy Crawl is designed for the era of AI agents. Because **Owl Browser** natively supports integration with LLM models, you can easily extend this tool with agentic capabilities:
+
+- **Self-Healing Workflows:** Agents that can navigate through UI changes autonomously.
+- **Semantic Actions:** "Find the checkout button and tell me the total" instead of hardcoded selectors.
+- **Real-time Reasoning:** Analyzing page content on-the-fly to make navigation decisions.
+
+The combination of a real browser engine and native LLM support makes Easy Crawl a foundation for building sophisticated web-based AI agents.
+
 ## 📦 Quick Start
 
 Run the entire stack with a single command:

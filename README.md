@@ -4,7 +4,7 @@
 
 The Owl Browser platform represents a paradigm shift in intelligent web automation and data extraction. Unlike traditional browser automation tools that rely on brittle CSS selectors and rigid scripting, Owl Browser integrates on-device AI capabilities including Vision-Language Models (VLMs), CAPTCHA solving, and semantic page understanding directly into the browser engine. This foundational technology enables a new generation of applications that can navigate the modern web with human-like intelligence, adapting to dynamic content, bypassing sophisticated anti-bot systems, and extracting meaningful information from complex layouts.
 
-The following portfolio showcases five flagship projects built on the Owl Browser platform, each addressing distinct market needs while demonstrating the versatility and power of AI-native browser automation. From democratizing web search to protecting brand integrity across e-commerce channels, these projects represent production-ready solutions for enterprises, researchers, and developers seeking to harness the full potential of intelligent web interaction.
+The following portfolio showcases six flagship projects built on the Owl Browser platform, each addressing distinct market needs while demonstrating the versatility and power of AI-native browser automation. From democratizing web search to protecting brand integrity across e-commerce channels, these projects represent production-ready solutions for enterprises, researchers, and developers seeking to harness the full potential of intelligent web interaction.
 
 ---
 
@@ -212,6 +212,7 @@ Easy Crawl is the ultimate showcase of "Browser-as-Backend." By offloading compl
 *   **Rendering:** Instead of complex headless browser orchestration (Puppeteer/Playwright), Easy Crawl simply requests the page. Owl Browser handles the JS execution and rendering.
 *   **Anti-Bot & CAPTCHA:** Detection avoidance and CAPTCHA solving are handled transparently by the browser engine, removing the need for stealth plugins or 3rd party solving services.
 *   **Extraction:** It utilizes Owl Browser's native `extract_site` and `get_markdown` capabilities, which use on-device AI to distinguish main content from boilerplate, ads, and navigation, without writing a single CSS selector.
+*   **Agentic Capabilities:** The platform is inherently extensible for AI agents. Since Owl Browser natively supports running with LLM models, developers can easily add "agentic tools"—such as semantic navigation or real-time reasoning—allowing the crawler to make autonomous decisions based on page content.
 
 ### Target Users and Use Cases
 
