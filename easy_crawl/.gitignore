@@ -1,0 +1,20 @@
+# Environments
+venv/
+.env
+
+# Dependencies
+node_modules/
+frontend/node_modules/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Build outputs
+dist/
+frontend/dist/
+
+# OS files
+.DS_Store
+Thumbs.db

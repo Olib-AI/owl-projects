@@ -1,0 +1,5 @@
+fastapi
+uvicorn
+owl-browser
+pydantic
+python-dotenv

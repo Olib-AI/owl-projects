@@ -192,6 +192,39 @@ The SmartStepExecutor implements a four-stage fallback chain: cached selectors f
 
 ---
 
+## Easy Crawl: The Minimalist AI Web Scraper
+
+### Purpose and Goals
+
+Easy Crawl challenges the assumption that building robust web scrapers requires complex, distributed infrastructure. It serves as a comprehensive web data platform but with a radically different philosophy: leveraging the intelligence of the browser engine itself rather than building complex backend logic.
+
+The goal was to demonstrate the power of the Owl Browser SDK by building a production-grade scraping, searching, and crawling platform with a backend of less than 200 lines of code. It provides a simple, unified interface for turning the chaotic web into structured data (Markdown, JSON) for LLMs and data pipelines.
+
+### Key Features and Capabilities
+
+Easy Crawl offers three core functions in a streamlined UI. The **Universal Scraper** converts any URL—regardless of JavaScript complexity—into clean Markdown or structured JSON. It handles Single Page Applications (SPAs) and hydration states natively.
+
+The **Deep Crawler** maps entire websites, following internal links to a specified depth to build knowledge bases or site maps. The **Smart Search** feature provides a structured interface for web queries, returning parsed and clean results suitable for programmatic use.
+
+### Owl Browser Integration
+
+Easy Crawl is the ultimate showcase of "Browser-as-Backend." By offloading complexity to Owl Browser, the application code becomes trivial.
+*   **Rendering:** Instead of complex headless browser orchestration (Puppeteer/Playwright), Easy Crawl simply requests the page. Owl Browser handles the JS execution and rendering.
+*   **Anti-Bot & CAPTCHA:** Detection avoidance and CAPTCHA solving are handled transparently by the browser engine, removing the need for stealth plugins or 3rd party solving services.
+*   **Extraction:** It utilizes Owl Browser's native `extract_site` and `get_markdown` capabilities, which use on-device AI to distinguish main content from boilerplate, ads, and navigation, without writing a single CSS selector.
+
+### Target Users and Use Cases
+
+Easy Crawl is ideal for developers building LLM applications (RAG pipelines) who need clean, reliable web data without managing a scraping infrastructure. It's also perfect for data scientists needing quick datasets, or marketers monitoring competitor content. It proves that with the right browser engine, "building a crawler" is no longer a massive engineering task.
+
+### Technical Highlights
+
+The technical marvel of Easy Crawl is its simplicity. The backend is a lightweight **FastAPI** wrapper that simply forwards instructions to the Owl Browser SDK. The frontend is a modern **React (Vite)** application styled with **Tailwind CSS**.
+
+Because the complexity is abstracted away by the browser, the application is incredibly easy to maintain and deploy. It supports asynchronous job management for long crawls and real-time feedback for scraping tasks, all orchestrated with minimal code overhead.
+
+---
+
 ## Conclusion
 
 The Owl Browser project portfolio demonstrates the transformative potential of AI-native browser automation across diverse domains. From democratizing web search to protecting cybersecurity posture, from understanding social media trends to maintaining e-commerce competitiveness, and from ensuring software quality to reducing test maintenance burden, these projects address real-world challenges with innovative solutions.
