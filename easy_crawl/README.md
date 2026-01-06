@@ -50,7 +50,7 @@ Perform live web searches and receive parsed, structured results instantly. Bypa
 
 This project demonstrates the **"Browser-as-Backend"** architecture:
 
-*   **Engine:** [Owl Browser SDK](https://github.com/olib-ai/owl-browser) (Handles rendering, AI extraction, Anti-bot)
+*   **Engine:** [Owl Browser SDK](https://www.owlbrowser.net) (Handles rendering, AI extraction, Anti-bot)
 *   **Backend:** Python FastAPI (Lightweight orchestration)
 *   **Frontend:** React + Tailwind CSS (Modern, responsive UI)
 
