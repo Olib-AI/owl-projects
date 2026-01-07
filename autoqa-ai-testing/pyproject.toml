@@ -67,6 +67,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# LLM integration for enhanced test generation and semantic assertions
+llm = [
+    "httpx>=0.28.0",  # Already included in main deps, listed for clarity
+]
 dev = [
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",

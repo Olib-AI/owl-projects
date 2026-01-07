@@ -96,6 +96,11 @@ class StepAction(StrEnum):
     ICON_ASSERT = "icon_assert"
     ACCESSIBILITY_ASSERT = "accessibility_assert"
 
+    # LLM-based assertions (optional, requires LLM configuration)
+    LLM_ASSERT = "llm_assert"
+    SEMANTIC_ASSERT = "semantic_assert"
+    CONTENT_ASSERT = "content_assert"
+
 
 class AssertionOperator(StrEnum):
     """Operators for assertion comparisons."""
@@ -647,10 +652,128 @@ class MLAssertionConfig(BaseModel):
         return self
 
 
+# =============================================================================
+# LLM-based Assertion Configurations (optional, requires LLM enabled)
+# =============================================================================
+
+
+class LLMAssertionConfig(BaseModel):
+    """
+    Configuration for LLM-based semantic assertions.
+
+    LLM assertions use large language models for intelligent validation:
+    - Semantic understanding of page state
+    - Natural language assertions
+    - Content quality analysis
+
+    Gracefully falls back when LLM is disabled.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Semantic assertion: natural language condition
+    assertion: str = Field(
+        description="Natural language assertion (e.g., 'page shows success message')",
+    )
+
+    # Optional context for the assertion
+    context: str | None = Field(
+        default=None,
+        description="Additional context to help validate the assertion",
+    )
+
+    # Confidence threshold (0.0-1.0)
+    min_confidence: float = Field(
+        default=0.7,
+        ge=0.0,
+        le=1.0,
+        description="Minimum confidence score to pass the assertion",
+    )
+
+    # Custom error message
+    message: str | None = None
+    timeout: int = Field(default=30000, ge=0, le=300000)
+
+    @field_validator("assertion")
+    @classmethod
+    def validate_assertion(cls, v: str) -> str:
+        """Ensure assertion is not empty."""
+        if not v.strip():
+            raise ValueError("Assertion cannot be empty")
+        return v
+
+
+class SemanticAssertionConfig(BaseModel):
+    """
+    Configuration for semantic state assertions.
+
+    Validates that the page is in an expected semantic state.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Expected state description
+    expected_state: str = Field(
+        description="Expected state (e.g., 'logged_in', 'checkout_complete')",
+    )
+
+    # State indicators to look for
+    indicators: list[str] = Field(
+        default_factory=list,
+        description="Specific indicators that signal the state",
+    )
+
+    # Confidence threshold
+    min_confidence: float = Field(default=0.7, ge=0.0, le=1.0)
+
+    message: str | None = None
+    timeout: int = Field(default=30000, ge=0, le=300000)
+
+
+class ContentAssertionConfig(BaseModel):
+    """
+    Configuration for content validation assertions.
+
+    Uses LLM to analyze and validate page content quality and correctness.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Content type for context
+    content_type: str = Field(
+        description="Type of content (e.g., 'product_page', 'search_results')",
+    )
+
+    # Expected content patterns
+    expected_patterns: list[str] = Field(
+        description="List of expected content patterns",
+    )
+
+    # Optional selector to scope content
+    selector: str | None = Field(
+        default=None,
+        description="CSS selector to limit content scope",
+    )
+
+    # Confidence threshold
+    min_confidence: float = Field(default=0.7, ge=0.0, le=1.0)
+
+    message: str | None = None
+    timeout: int = Field(default=30000, ge=0, le=300000)
+
+    @field_validator("expected_patterns")
+    @classmethod
+    def validate_patterns(cls, v: list[str]) -> list[str]:
+        """Ensure at least one pattern is specified."""
+        if not v:
+            raise ValueError("At least one expected pattern must be specified")
+        return v
+
+
 class TestStep(BaseModel):
     """A single test step with natural language support."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     name: str | None = None
     action: StepAction
@@ -729,6 +852,11 @@ class TestStep(BaseModel):
     icon_assertion: IconAssertionConfig | None = None
     accessibility_assertion: AccessibilityAssertionConfig | None = None
 
+    # LLM-based assertion configurations (optional, requires LLM enabled)
+    llm_assertion: LLMAssertionConfig | None = None
+    semantic_assertion: SemanticAssertionConfig | None = None
+    content_assertion: ContentAssertionConfig | None = None
+
     # Flow control
     skip_if: str | None = None
     continue_on_failure: bool = False
@@ -737,6 +865,14 @@ class TestStep(BaseModel):
 
     # Variable capture
     capture_as: str | None = None
+
+    # Recovery/healing metadata (used by test runner for URL-aware recovery)
+    # If step fails, runner can navigate to this URL and retry
+    expected_url: str | None = Field(
+        default=None,
+        alias="_expected_url",
+        description="Expected page URL for this step. Used for recovery when element not found.",
+    )
 
     @model_validator(mode="after")
     def validate_step_params(self) -> TestStep:
@@ -805,6 +941,14 @@ class TestStep(BaseModel):
             raise ValueError("Action 'icon_assert' requires 'icon_assertion' configuration")
         if self.action == StepAction.ACCESSIBILITY_ASSERT and not self.accessibility_assertion:
             raise ValueError("Action 'accessibility_assert' requires 'accessibility_assertion' configuration")
+
+        # LLM-based assertion validations
+        if self.action == StepAction.LLM_ASSERT and not self.llm_assertion:
+            raise ValueError("Action 'llm_assert' requires 'llm_assertion' configuration")
+        if self.action == StepAction.SEMANTIC_ASSERT and not self.semantic_assertion:
+            raise ValueError("Action 'semantic_assert' requires 'semantic_assertion' configuration")
+        if self.action == StepAction.CONTENT_ASSERT and not self.content_assertion:
+            raise ValueError("Action 'content_assert' requires 'content_assertion' configuration")
 
         return self
 

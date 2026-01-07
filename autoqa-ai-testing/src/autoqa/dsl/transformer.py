@@ -91,6 +91,10 @@ class StepTransformer:
             StepAction.LAYOUT_ASSERT,
             StepAction.ICON_ASSERT,
             StepAction.ACCESSIBILITY_ASSERT,
+            # LLM-based assertions
+            StepAction.LLM_ASSERT,
+            StepAction.SEMANTIC_ASSERT,
+            StepAction.CONTENT_ASSERT,
         ):
             return self._transform_assertion(step)
 
@@ -310,6 +314,13 @@ class StepTransformer:
                 return "_assert_icon", {"config": step.icon_assertion}
             case StepAction.ACCESSIBILITY_ASSERT:
                 return "_assert_accessibility", {"config": step.accessibility_assertion}
+            # LLM-based assertions
+            case StepAction.LLM_ASSERT:
+                return "_assert_llm", {"config": step.llm_assertion}
+            case StepAction.SEMANTIC_ASSERT:
+                return "_assert_semantic", {"config": step.semantic_assertion}
+            case StepAction.CONTENT_ASSERT:
+                return "_assert_content", {"config": step.content_assertion}
             case _:
                 raise ValueError(f"Unknown assertion type: {step.action}")
 

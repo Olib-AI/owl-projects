@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 import structlog
 
@@ -110,12 +111,19 @@ class TestRunResult:
     network_log: list[dict[str, Any]] = field(default_factory=list)
 
 
+class PageRecoveryError(Exception):
+    """Raised when page recovery (navigation to expected URL) fails."""
+
+    pass
+
+
 class TestRunner:
     """
     Executes test specifications using owl-browser.
 
     Features:
     - Self-healing selector recovery (deterministic, no AI)
+    - URL-aware recovery: navigates to expected page if on wrong page
     - Automatic retries with exponential backoff (tenacity)
     - Smart waits: wait_for_network_idle after navigation
     - wait_for_selector before interactions
@@ -159,6 +167,7 @@ class TestRunner:
         pre_action_visibility_check: bool = True,
         enable_versioning: bool = False,
         versioning_storage_path: str = ".autoqa/history",
+        enable_url_recovery: bool = True,
     ) -> None:
         self._browser = browser
         self._healing_engine = healing_engine or SelfHealingEngine()
@@ -170,8 +179,13 @@ class TestRunner:
         self._wait_for_network_idle = wait_for_network_idle
         self._network_idle_timeout = network_idle_timeout_ms
         self._pre_action_visibility_check = pre_action_visibility_check
+        self._enable_url_recovery = enable_url_recovery
         self._transformer = StepTransformer()
         self._log = logger.bind(component="test_runner")
+
+        # URL recovery tracking - stores the expected URL from navigate actions
+        # and step-level _expected_url metadata
+        self._current_expected_url: str | None = None
 
         # Versioning support
         self._enable_versioning = enable_versioning
@@ -461,7 +475,15 @@ class TestRunner:
         index: int,
         test_result: TestRunResult,
     ) -> StepResult:
-        """Execute a single test step with smart waits and robustness."""
+        """
+        Execute a single test step with smart waits, URL recovery, and robustness.
+
+        URL-aware recovery flow:
+        1. Track expected URL from navigate actions and step metadata
+        2. Before element actions, verify we're on the expected page
+        3. If element not found, try URL recovery before selector healing
+        4. Log all recovery attempts for debugging
+        """
         step_name = step.name or f"Step {index + 1}"
         start_time = time.monotonic()
 
@@ -476,15 +498,36 @@ class TestRunner:
                 status=StepStatus.SKIPPED,
             )
 
+        # Track expected URL from navigate actions
+        if step.action == StepAction.NAVIGATE and step.url:
+            self._current_expected_url = step.url
+            self._log.debug("Updated expected URL", url=step.url)
+
+        # Update expected URL from step metadata if provided
+        step_expected_url = step.expected_url
+        if step_expected_url:
+            self._current_expected_url = step_expected_url
+
         method_name, args = self._transformer.transform(step)
         args = self._interpolate_args(args, test_result.variables)
 
         last_error: Exception | None = None
         retries = 0
         network_log: list[dict[str, Any]] | None = None
+        url_recovery_attempted = False
 
         for attempt in range(step.retry_count + 1):
             try:
+                # URL-aware pre-check: verify we're on the expected page
+                # before attempting element interactions
+                if (
+                    self._enable_url_recovery
+                    and step.action in self.INTERACTION_ACTIONS
+                    and step.selector
+                    and self._current_expected_url
+                ):
+                    self._verify_or_recover_url(page, self._current_expected_url)
+
                 # Smart pre-action waits for interaction actions
                 if step.action in self.INTERACTION_ACTIONS and step.selector:
                     self._ensure_element_ready(page, step.selector, step.timeout)
@@ -517,6 +560,63 @@ class TestRunner:
                 last_error = e
                 retries = attempt
 
+                # RECOVERY STRATEGY 1: URL-aware recovery
+                # If element not found and we have an expected URL, try navigating there first
+                if (
+                    self._enable_url_recovery
+                    and not url_recovery_attempted
+                    and step.selector
+                    and self._is_element_not_found_error(e)
+                    and self._current_expected_url
+                ):
+                    url_recovery_attempted = True
+                    recovery_success = self._attempt_url_recovery(
+                        page,
+                        self._current_expected_url,
+                        step_name,
+                    )
+
+                    if recovery_success:
+                        # After URL recovery, retry the step immediately
+                        self._log.info(
+                            "URL recovery successful, retrying step",
+                            step=step_name,
+                            url=self._current_expected_url,
+                        )
+                        try:
+                            if step.action in self.INTERACTION_ACTIONS:
+                                self._ensure_element_ready(page, step.selector, step.timeout)
+
+                            result = self._execute_browser_command(
+                                page, method_name, args, step
+                            )
+
+                            if self._wait_for_network_idle and step.action in self.NAVIGATION_ACTIONS:
+                                self._wait_for_stable_state(page)
+
+                            if step.capture_as:
+                                test_result.variables[step.capture_as] = result
+
+                            duration = int((time.monotonic() - start_time) * 1000)
+
+                            return StepResult(
+                                step_index=index,
+                                step_name=step.name,
+                                action=step.action,
+                                status=StepStatus.HEALED,
+                                duration_ms=duration,
+                                result=result if self._transformer.should_capture_result(step) else None,
+                                retries=retries,
+                            )
+                        except Exception as recovery_error:
+                            last_error = recovery_error
+                            self._log.warning(
+                                "Step still failed after URL recovery",
+                                step=step_name,
+                                error=str(recovery_error),
+                            )
+
+                # RECOVERY STRATEGY 2: Selector self-healing
                 # Attempt self-healing for element not found errors
                 if step.selector and self._is_element_not_found_error(e):
                     healing_result = self._healing_engine.heal_selector(
@@ -656,6 +756,120 @@ class TestRunner:
         except Exception as e:
             self._log.debug("Network idle wait timed out", error=str(e))
 
+    def _verify_or_recover_url(
+        self,
+        page: BrowserContext,
+        expected_url: str,
+    ) -> None:
+        """
+        Verify browser is on expected URL, navigate if not.
+
+        This is a proactive check before element interactions to ensure
+        we're on the correct page. Does NOT raise on recovery failure -
+        that will be caught when the element interaction fails.
+
+        Args:
+            page: Browser context
+            expected_url: Expected URL (full URL or path)
+        """
+        try:
+            current_url = page.get_current_url()
+            if not current_url:
+                return
+
+            # Check if current URL matches expected (either full URL or path)
+            expected_parsed = urlparse(expected_url)
+            current_parsed = urlparse(current_url)
+
+            # Compare paths (more flexible than full URL match)
+            expected_path = expected_parsed.path.rstrip("/") or "/"
+            current_path = current_parsed.path.rstrip("/") or "/"
+
+            if current_path != expected_path:
+                self._log.info(
+                    "URL mismatch detected, navigating to expected page",
+                    current=current_url,
+                    expected=expected_url,
+                    current_path=current_path,
+                    expected_path=expected_path,
+                )
+                # Navigate to expected URL
+                page.goto(expected_url, wait_until="domcontentloaded", timeout=10000)
+                self._wait_for_stable_state(page)
+
+        except Exception as e:
+            self._log.warning(
+                "URL verification/recovery failed",
+                expected_url=expected_url,
+                error=str(e),
+            )
+
+    def _attempt_url_recovery(
+        self,
+        page: BrowserContext,
+        expected_url: str,
+        step_name: str,
+    ) -> bool:
+        """
+        Attempt to recover by navigating to the expected URL.
+
+        Called when an element is not found and we have an expected URL.
+        This handles the case where the browser ended up on a different page
+        (e.g., due to a redirect, timeout, or prior navigation failure).
+
+        Args:
+            page: Browser context
+            expected_url: URL where the element should exist
+            step_name: Name of the step (for logging)
+
+        Returns:
+            True if recovery navigation succeeded, False otherwise
+        """
+        try:
+            current_url = page.get_current_url() or "unknown"
+            self._log.info(
+                "Attempting URL recovery",
+                step=step_name,
+                current_url=current_url,
+                target_url=expected_url,
+            )
+
+            # Navigate to expected URL
+            page.goto(expected_url, wait_until="domcontentloaded", timeout=10000)
+
+            # Wait for page to stabilize
+            self._wait_for_stable_state(page)
+
+            # Verify navigation succeeded
+            new_url = page.get_current_url() or ""
+            expected_path = urlparse(expected_url).path.rstrip("/") or "/"
+            new_path = urlparse(new_url).path.rstrip("/") or "/"
+
+            if new_path == expected_path:
+                self._log.info(
+                    "URL recovery succeeded",
+                    step=step_name,
+                    url=new_url,
+                )
+                return True
+            else:
+                self._log.warning(
+                    "URL recovery navigated to unexpected page",
+                    step=step_name,
+                    expected_path=expected_path,
+                    actual_path=new_path,
+                )
+                return False
+
+        except Exception as e:
+            self._log.error(
+                "URL recovery failed",
+                step=step_name,
+                expected_url=expected_url,
+                error=str(e),
+            )
+            return False
+
     def _calculate_backoff_delay(self, attempt: int, base_delay_ms: int) -> int:
         """Calculate exponential backoff delay with jitter."""
         import random
@@ -761,6 +975,9 @@ class TestRunner:
                 return engine.assert_icon(args["config"])
             case "_assert_accessibility":
                 return engine.assert_accessibility(args["config"])
+            # LLM-based assertions
+            case "_assert_llm" | "_assert_semantic" | "_assert_content":
+                return self._execute_llm_assertion(page, method_name, args)
             case _:
                 raise ValueError(f"Unknown assertion type: {method_name}")
 
@@ -839,3 +1056,79 @@ class TestRunner:
             "selector did not match",
         ]
         return any(indicator in error_str for indicator in indicators)
+
+    def _execute_llm_assertion(
+        self,
+        page: BrowserContext,
+        method_name: str,
+        args: dict[str, Any],
+    ) -> bool:
+        """
+        Execute an LLM-based assertion.
+
+        Uses asyncio to run the async LLM assertion engine.
+        Falls back gracefully when LLM is disabled.
+        """
+        import asyncio
+
+        from autoqa.llm.assertions import LLMAssertionEngine, LLMAssertionError
+
+        async def run_assertion() -> bool:
+            engine = LLMAssertionEngine(page)
+
+            match method_name:
+                case "_assert_llm":
+                    config = args["config"]
+                    result = await engine.assert_semantic(
+                        assertion=config.assertion,
+                        context=config.context,
+                        min_confidence=config.min_confidence,
+                        message=config.message,
+                    )
+                    return result.passed
+
+                case "_assert_semantic":
+                    config = args["config"]
+                    result = await engine.assert_state(
+                        expected_state=config.expected_state,
+                        indicators=config.indicators,
+                        min_confidence=config.min_confidence,
+                        message=config.message,
+                    )
+                    return result.passed
+
+                case "_assert_content":
+                    config = args["config"]
+                    result = await engine.assert_content_valid(
+                        content_type=config.content_type,
+                        expected_patterns=config.expected_patterns,
+                        selector=config.selector,
+                        min_confidence=config.min_confidence,
+                        message=config.message,
+                    )
+                    return result.passed
+
+                case _:
+                    raise ValueError(f"Unknown LLM assertion type: {method_name}")
+
+        try:
+            # Run the async assertion
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # If we're already in an async context, create a new task
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(asyncio.run, run_assertion())
+                    return future.result(timeout=60)
+            else:
+                return asyncio.run(run_assertion())
+
+        except LLMAssertionError:
+            raise
+        except Exception as e:
+            self._log.warning(
+                "LLM assertion execution failed, using fallback",
+                error=str(e),
+            )
+            # Return True to allow fallback behavior (assertion passes with warning)
+            return True

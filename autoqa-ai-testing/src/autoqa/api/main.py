@@ -397,6 +397,81 @@ def create_app() -> FastAPI:
             days=days,
         )
 
+    @app.post("/api/v1/build")
+    async def build_test_spec(
+        url: str = Query(..., description="Starting page URL to analyze"),
+        username: str | None = Query(None, description="Username for authentication"),
+        password: str | None = Query(None, description="Password for authentication"),
+        depth: int = Query(1, ge=0, le=5, description="Crawl depth for same-domain pages"),
+        max_pages: int = Query(10, ge=1, le=50, description="Maximum pages to analyze"),
+        include_hidden: bool = Query(False, description="Include hidden elements"),
+        timeout_ms: int = Query(30000, ge=1000, le=120000, description="Timeout in ms"),
+    ) -> dict[str, Any]:
+        """
+        Auto-generate YAML test specification from a webpage.
+
+        Analyzes the specified URL (and optionally crawls same-domain links)
+        to discover interactive elements and generate a complete test spec.
+        """
+        from owl_browser import Browser, RemoteConfig
+
+        from autoqa.builder.test_builder import AutoTestBuilder, BuilderConfig
+
+        owl_browser_url = os.environ.get("OWL_BROWSER_URL")
+        owl_browser_token = os.environ.get("OWL_BROWSER_TOKEN")
+
+        if not owl_browser_url:
+            raise HTTPException(
+                status_code=503,
+                detail="OWL_BROWSER_URL not configured",
+            )
+
+        try:
+            remote_config = RemoteConfig(url=owl_browser_url, token=owl_browser_token)
+            browser = Browser(remote=remote_config)
+            browser.launch()
+
+            try:
+                config = BuilderConfig(
+                    url=url,
+                    username=username,
+                    password=password,
+                    depth=depth,
+                    max_pages=max_pages,
+                    include_hidden=include_hidden,
+                    timeout_ms=timeout_ms,
+                )
+
+                builder = AutoTestBuilder(browser=browser, config=config)
+                yaml_content = builder.build()
+
+                # Extract summary from page analyses
+                pages_analyzed = len(builder._page_analyses)
+                total_elements = sum(len(p.elements) for p in builder._page_analyses)
+                has_login = any(p.has_login_form for p in builder._page_analyses)
+
+                return {
+                    "success": True,
+                    "yaml_content": yaml_content,
+                    "summary": {
+                        "url": url,
+                        "pages_analyzed": pages_analyzed,
+                        "total_elements": total_elements,
+                        "has_login_form": has_login,
+                        "depth": depth,
+                    },
+                }
+
+            finally:
+                browser.close()
+
+        except Exception as e:
+            logger.error("Build failed", url=url, error=str(e))
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to build test specification: {e}",
+            ) from e
+
     return app
 
 

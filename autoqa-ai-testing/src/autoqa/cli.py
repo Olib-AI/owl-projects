@@ -272,6 +272,68 @@ def create_parser() -> argparse.ArgumentParser:
     )
     server_parser.set_defaults(func=cmd_server)
 
+    # Build command - Auto Test Builder
+    build_parser = subparsers.add_parser(
+        "build",
+        help="Auto-generate YAML test specification from a webpage",
+    )
+    build_parser.add_argument(
+        "url",
+        help="Starting page URL to analyze",
+    )
+    build_parser.add_argument(
+        "--username", "-u",
+        help="Username for authentication (optional)",
+    )
+    build_parser.add_argument(
+        "--password", "-p",
+        help="Password for authentication (optional)",
+    )
+    build_parser.add_argument(
+        "--depth", "-d",
+        type=int,
+        default=1,
+        help="Crawl depth for same-domain pages (default: 1)",
+    )
+    build_parser.add_argument(
+        "--max-pages",
+        type=int,
+        default=10,
+        help="Maximum number of pages to analyze (default: 10)",
+    )
+    build_parser.add_argument(
+        "--output", "-o",
+        help="Output file path for generated YAML (default: stdout)",
+    )
+    build_parser.add_argument(
+        "--include-hidden",
+        action="store_true",
+        help="Include hidden elements in analysis",
+    )
+    build_parser.add_argument(
+        "--timeout",
+        type=int,
+        default=30000,
+        help="Timeout in milliseconds for page operations (default: 30000)",
+    )
+    build_parser.add_argument(
+        "--exclude",
+        action="append",
+        default=[],
+        dest="exclude_patterns",
+        metavar="PATTERN",
+        help="Regex pattern for URLs to exclude (can be repeated)",
+    )
+    build_parser.add_argument(
+        "--include",
+        action="append",
+        default=[],
+        dest="include_patterns",
+        metavar="PATTERN",
+        help="Regex pattern for URLs to include (can be repeated)",
+    )
+    build_parser.set_defaults(func=cmd_build)
+
     return parser
 
 
@@ -759,6 +821,68 @@ def cmd_server(args: argparse.Namespace) -> int:
     print(f"Starting AutoQA API server on {args.host}:{args.port}")
     run_server(host=args.host, port=args.port)
     return 0
+
+
+def cmd_build(args: argparse.Namespace) -> int:
+    """Auto-generate YAML test specification from a webpage."""
+    from dotenv import load_dotenv
+    from owl_browser import Browser, RemoteConfig
+
+    from autoqa.builder.test_builder import AutoTestBuilder, BuilderConfig
+
+    # Load environment variables from .env file
+    load_dotenv()
+
+    # Remote browser configuration - required
+    owl_browser_url = os.getenv("OWL_BROWSER_URL")
+    owl_browser_token = os.getenv("OWL_BROWSER_TOKEN")
+
+    if not owl_browser_url:
+        print("Error: OWL_BROWSER_URL environment variable is required", file=sys.stderr)
+        print("Set OWL_BROWSER_URL in .env file or environment", file=sys.stderr)
+        return 1
+
+    logger.info("Connecting to remote browser", url=owl_browser_url)
+    remote_config = RemoteConfig(url=owl_browser_url, token=owl_browser_token)
+    browser = Browser(remote=remote_config)
+    browser.launch()
+
+    try:
+        # Create builder configuration
+        config = BuilderConfig(
+            url=args.url,
+            username=args.username,
+            password=args.password,
+            depth=args.depth,
+            max_pages=args.max_pages,
+            include_hidden=args.include_hidden,
+            timeout_ms=args.timeout,
+            exclude_patterns=args.exclude_patterns,
+            include_patterns=args.include_patterns,
+        )
+
+        # Run the builder
+        builder = AutoTestBuilder(browser=browser, config=config)
+        yaml_content = builder.build()
+
+        # Output results
+        if args.output:
+            output_path = Path(args.output)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(yaml_content)
+            print(f"Test specification written to {args.output}")
+        else:
+            print(yaml_content)
+
+        return 0
+
+    except Exception as e:
+        logger.error("Build failed", error=str(e))
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    finally:
+        browser.close()
 
 
 if __name__ == "__main__":
