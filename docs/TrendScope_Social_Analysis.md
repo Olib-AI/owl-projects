@@ -73,10 +73,10 @@ from enum import Enum, auto
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from owl_browser import Browser, RemoteConfig, ProxyConfig, ExtractionTemplate
+from owl_browser import AsyncBrowser, RemoteConfig, ProxyConfig, ExtractionTemplate, AsyncPage
 
 if TYPE_CHECKING:
-    from owl_browser import Page
+    from owl_browser import AsyncPage
 
 
 class AccountStatus(Enum):
@@ -180,7 +180,7 @@ class AccountPoolManager:
 
     def __init__(
         self,
-        browser: Browser,
+        browser: AsyncBrowser,
         profiles_directory: Path,
         proxy_pool: list[ProxyConfig],
     ) -> None:
@@ -225,19 +225,20 @@ class AccountPoolManager:
                 )
 
             # Create session record
+            proxy_key = f"{proxy.host}:{proxy.port}" if proxy else None
             session = AccountSession(
                 account_id=account_id,
                 platform=credentials.platform,
                 profile_path=profile_path,
-                proxy_binding=proxy.url if proxy else None,
+                proxy_binding=proxy_key,
                 status=AccountStatus.HEALTHY,
                 last_health_check=datetime.now(),
             )
 
             async with self._lock:
                 self._sessions[account_id] = session
-                if proxy:
-                    self._proxy_bindings[proxy.url] = account_id
+                if proxy and proxy_key:
+                    self._proxy_bindings[proxy_key] = account_id
 
             return account_id
 
@@ -282,8 +283,9 @@ class AccountPoolManager:
             # Select session with proxy preference
             selected = available[0]
             if preferred_proxy:
+                preferred_key = f"{preferred_proxy.host}:{preferred_proxy.port}"
                 for session in available:
-                    if session.proxy_binding == preferred_proxy.url:
+                    if session.proxy_binding == preferred_key:
                         selected = session
                         break
 
@@ -291,7 +293,8 @@ class AccountPoolManager:
             proxy = None
             if selected.proxy_binding:
                 proxy = next(
-                    (p for p in self._proxy_pool if p.url == selected.proxy_binding),
+                    (p for p in self._proxy_pool
+                     if f"{p.host}:{p.port}" == selected.proxy_binding),
                     None
                 )
 
@@ -330,11 +333,12 @@ class AccountPoolManager:
         proxy = None
         if session.proxy_binding:
             proxy = next(
-                (p for p in self._proxy_pool if p.url == session.proxy_binding),
+                (p for p in self._proxy_pool
+                 if f"{p.host}:{p.port}" == session.proxy_binding),
                 None
             )
 
-        page = self._browser.new_page(proxy=proxy)
+        page = await self._browser.new_page(proxy=proxy)
 
         try:
             # Load saved profile
@@ -395,11 +399,12 @@ class AccountPoolManager:
         proxy = None
         if session.proxy_binding:
             proxy = next(
-                (p for p in self._proxy_pool if p.url == session.proxy_binding),
+                (p for p in self._proxy_pool
+                 if f"{p.host}:{p.port}" == session.proxy_binding),
                 None
             )
 
-        page = self._browser.new_page(proxy=proxy)
+        page = await self._browser.new_page(proxy=proxy)
 
         try:
             # Load existing profile
@@ -488,7 +493,7 @@ class AccountPoolManager:
 
     async def _perform_login(
         self,
-        page: Page,
+        page: AsyncPage,
         credentials: AccountCredentials,
         profile_path: Path,
     ) -> bool:
@@ -615,10 +620,10 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any
 from collections.abc import Callable, Awaitable
 
-from owl_browser import Browser, RemoteConfig, ProxyConfig
+from owl_browser import AsyncBrowser, RemoteConfig, ProxyConfig, AsyncPage
 
 if TYPE_CHECKING:
-    from owl_browser import Page
+    from owl_browser import AsyncPage
 
 
 class ProxyType(Enum):
@@ -948,7 +953,7 @@ class StealthEngine:
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
     ]
 
-    def __init__(self, browser: Browser) -> None:
+    def __init__(self, browser: AsyncBrowser) -> None:
         self._browser = browser
         self._profiles: dict[str, StealthProfile] = {}
 
@@ -1021,7 +1026,7 @@ class StealthEngine:
 
     async def apply_profile(
         self,
-        page: Page,
+        page: AsyncPage,
         profile: StealthProfile,
     ) -> None:
         """Apply stealth profile to a page context.
@@ -1065,7 +1070,7 @@ class StealthEngine:
 
     async def human_type(
         self,
-        page: Page,
+        page: AsyncPage,
         selector: str,
         text: str,
         profile: StealthProfile,
@@ -1097,7 +1102,7 @@ class StealthEngine:
 
     async def human_scroll(
         self,
-        page: Page,
+        page: AsyncPage,
         target_y: int,
         profile: StealthProfile,
     ) -> None:
@@ -1141,7 +1146,7 @@ class StealthEngine:
 
     async def random_mouse_movement(
         self,
-        page: Page,
+        page: AsyncPage,
     ) -> None:
         """Perform random mouse movements to simulate human presence."""
         viewport = await page.get_viewport()
@@ -1227,10 +1232,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from owl_browser import Browser, RemoteConfig, ProxyConfig
+from owl_browser import AsyncBrowser, RemoteConfig, ProxyConfig, AsyncPage
 
 if TYPE_CHECKING:
-    from owl_browser import Page
+    from owl_browser import AsyncPage
 
 
 @dataclass(slots=True)
@@ -1264,7 +1269,7 @@ class TwitterScraper:
 
     def __init__(
         self,
-        browser: Browser,
+        browser: AsyncBrowser,
         proxy_config: ProxyConfig | None = None,
     ) -> None:
         self._browser = browser
@@ -1521,10 +1526,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from owl_browser import Browser, RemoteConfig, ProxyConfig
+from owl_browser import AsyncBrowser, RemoteConfig, ProxyConfig, AsyncPage
 
 if TYPE_CHECKING:
-    from owl_browser import Page
+    from owl_browser import AsyncPage
 
 
 @dataclass(slots=True)
@@ -1559,7 +1564,7 @@ class TikTokScraper:
 
     def __init__(
         self,
-        browser: Browser,
+        browser: AsyncBrowser,
         proxy_config: ProxyConfig | None = None,
     ) -> None:
         self._browser = browser
@@ -1833,10 +1838,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Literal
 
-from owl_browser import Browser, RemoteConfig, ProxyConfig
+from owl_browser import AsyncBrowser, RemoteConfig, ProxyConfig, AsyncPage
 
 if TYPE_CHECKING:
-    from owl_browser import Page
+    from owl_browser import AsyncPage
 
 
 @dataclass(slots=True)
@@ -1885,7 +1890,7 @@ class LinkedInScraper:
 
     def __init__(
         self,
-        browser: Browser,
+        browser: AsyncBrowser,
         profile_path: str,
         proxy_config: ProxyConfig | None = None,
     ) -> None:
@@ -2233,10 +2238,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Literal
 
-from owl_browser import Browser, RemoteConfig, ProxyConfig
+from owl_browser import AsyncBrowser, RemoteConfig, ProxyConfig, AsyncPage
 
 if TYPE_CHECKING:
-    from owl_browser import Page
+    from owl_browser import AsyncPage
 
 
 @dataclass(slots=True)
@@ -2285,7 +2290,7 @@ class InstagramScraper:
 
     def __init__(
         self,
-        browser: Browser,
+        browser: AsyncBrowser,
         proxy_config: ProxyConfig | None = None,
         profile_path: str | None = None,
     ) -> None:
@@ -2753,7 +2758,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 if TYPE_CHECKING:
-    from owl_browser import Page
+    from owl_browser import AsyncPage
 
 
 class SentimentLabel(Enum):
@@ -2842,13 +2847,13 @@ class ContentAnalyzer:
 
     async def analyze_visual_content(
         self,
-        page: Page,
+        page: AsyncPage,
         include_ocr: bool = True,
     ) -> dict[str, Any]:
         """Analyze visual content using Owl Browser's VLM.
 
         Args:
-            page: Page with visual content to analyze.
+            page: AsyncPage with visual content to analyze.
             include_ocr: Whether to extract text from images.
 
         Returns:
@@ -4070,7 +4075,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from owl_browser import Page
+    from owl_browser import AsyncPage
 
 
 class PIIType(Enum):
@@ -4247,7 +4252,7 @@ class ComplianceEngine:
 
     async def detect_and_blur_faces(
         self,
-        page: Page,
+        page: AsyncPage,
         screenshot_path: str,
     ) -> dict[str, Any]:
         """Detect and blur faces in a screenshot.

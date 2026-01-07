@@ -392,8 +392,8 @@ from datetime import datetime, UTC
 from typing import AsyncGenerator, Final
 from urllib.parse import urlparse, urljoin
 
-from owl_browser import Browser, RemoteConfig, ProxyConfig as OwlProxyConfig
-from owl_browser import NetworkRule, ExtractionTemplate
+from owl_browser import AsyncBrowser, RemoteConfig, ProxyConfig as OwlProxyConfig
+from owl_browser import NetworkRule, ExtractionTemplate, AsyncPage
 from owl_browser.exceptions import (
     ElementNotFoundError,
     ActionError,
@@ -468,13 +468,13 @@ class SmartCrawler:
             url=config.server_url,
             token=config.token,
         )
-        self._browser: Browser | None = None
+        self._browser: AsyncBrowser | None = None
         self._domain_last_access: dict[str, float] = {}
         self._domain_delays: dict[str, float] = {}  # From robots.txt
 
     async def __aenter__(self) -> SmartCrawler:
         """Async context manager entry."""
-        self._browser = Browser(remote=self._remote_config)
+        self._browser = AsyncBrowser(remote=self._remote_config)
         await self._browser.__aenter__()
         return self
 
@@ -669,7 +669,7 @@ class SmartCrawler:
         })()
         """
 
-        raw_metadata = await page.evaluate(metadata_script, return_value=True)
+        raw_metadata = await page.expression(metadata_script)
 
         return StructuredMetadata(
             open_graph=OpenGraphData(**raw_metadata.get("open_graph", {})),
@@ -690,7 +690,7 @@ class SmartCrawler:
         }))
         """
 
-        raw_links = await page.evaluate(links_script, return_value=True)
+        raw_links = await page.expression(links_script)
         parsed_base = urlparse(base_url)
 
         extracted_links: list[ExtractedLink] = []
@@ -1182,7 +1182,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TypedDict
 
-from owl_browser import Browser, RemoteConfig
+from owl_browser import AsyncBrowser, RemoteConfig
 
 logger = logging.getLogger(__name__)
 
@@ -1236,7 +1236,7 @@ class ProfileManager:
         """
         profile_path = self.profiles_dir / f"{name}.owlprofile"
 
-        async with Browser(remote=self.remote_config) as browser:
+        async with AsyncBrowser(remote=self.remote_config) as browser:
             # Create profile with randomized fingerprint
             await browser.create_profile(name=name)
 
@@ -1305,7 +1305,7 @@ class ProfileManager:
         if not profile_path.exists():
             raise FileNotFoundError(f"Profile not found: {name}")
 
-        async with Browser(remote=self.remote_config) as browser:
+        async with AsyncBrowser(remote=self.remote_config) as browser:
             page = await browser.new_page()
 
             try:
@@ -1338,7 +1338,7 @@ class ProfileManager:
         if not profile_path.exists():
             return []
 
-        async with Browser(remote=self.remote_config) as browser:
+        async with AsyncBrowser(remote=self.remote_config) as browser:
             page = await browser.new_page()
 
             try:

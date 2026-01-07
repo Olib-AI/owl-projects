@@ -50,7 +50,7 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import TypedDict
 
-from owl_browser import Browser, RemoteConfig, ProxyConfig, Page, ExtractionTemplate
+from owl_browser import AsyncBrowser, RemoteConfig, ProxyConfig, AsyncPage, ExtractionTemplate
 
 
 class BuyBoxStatus(StrEnum):
@@ -99,10 +99,10 @@ class AmazonScraper:
     Amazon's A/B tests and regional differences.
     """
 
-    browser: Browser
+    browser: AsyncBrowser
     marketplace: str = "amazon.com"
 
-    async def scrape_product(self, asin: str, *, page: Page | None = None) -> AmazonProductData:
+    async def scrape_product(self, asin: str, *, page: AsyncPage | None = None) -> AmazonProductData:
         """
         Extract complete product data including Buy Box status.
 
@@ -159,7 +159,7 @@ class AmazonScraper:
             if should_close_page:
                 await page.close()
 
-    async def _detect_buy_box_status(self, page: Page) -> BuyBoxStatus:
+    async def _detect_buy_box_status(self, page: AsyncPage) -> BuyBoxStatus:
         """Detect Buy Box ownership using VLM analysis."""
         # Query the page visually for Buy Box state
         response = await page.query_page(
@@ -181,15 +181,14 @@ class AmazonScraper:
 
         return BuyBoxStatus.UNKNOWN
 
-    async def _extract_seller_id(self, page: Page) -> str | None:
+    async def _extract_seller_id(self, page: AsyncPage) -> str | None:
         """Extract seller ID from the seller link."""
         try:
-            seller_link = await page.evaluate(
-                """() => {
+            seller_link = await page.expression(
+                """(() => {
                     const link = document.querySelector('#sellerProfileTriggerId');
                     return link ? link.href : null;
-                }""",
-                return_value=True
+                })()"""
             )
             if seller_link and "seller=" in seller_link:
                 return seller_link.split("seller=")[1].split("&")[0]
@@ -197,18 +196,17 @@ class AmazonScraper:
             pass
         return None
 
-    async def _extract_image_urls(self, page: Page) -> list[str]:
+    async def _extract_image_urls(self, page: AsyncPage) -> list[str]:
         """Extract all product image URLs."""
         try:
-            urls = await page.evaluate(
-                """() => {
+            urls = await page.expression(
+                """(() => {
                     const images = document.querySelectorAll('#altImages img, #imgTagWrapperId img');
                     return Array.from(images)
                         .map(img => img.src || img.dataset.src)
                         .filter(src => src && src.includes('images'))
                         .map(src => src.replace(/\._.*_\./, '._SL1500_.'));
-                }""",
-                return_value=True
+                })()"""
             )
             return urls or []
         except Exception:
@@ -219,7 +217,7 @@ class AmazonScraper:
         query: str,
         *,
         max_pages: int = 3,
-        page: Page | None = None
+        page: AsyncPage | None = None
     ) -> list[AmazonSearchResult]:
         """
         Scrape Amazon search results with pagination.
@@ -265,9 +263,8 @@ class AmazonScraper:
 
                 # Navigate to next page if available
                 if page_num < max_pages - 1:
-                    next_exists = await page.evaluate(
-                        "() => !!document.querySelector('.s-pagination-next:not(.s-pagination-disabled)')",
-                        return_value=True
+                    next_exists = await page.expression(
+                        "!!document.querySelector('.s-pagination-next:not(.s-pagination-disabled)')"
                     )
                     if not next_exists:
                         break
@@ -294,7 +291,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import TypedDict
 
-from owl_browser import Browser, Page, ProxyConfig
+from owl_browser import AsyncBrowser, AsyncPage, ProxyConfig
 
 
 class WalmartProductData(TypedDict):
@@ -334,14 +331,14 @@ class WalmartScraper:
     and fingerprint rotation.
     """
 
-    browser: Browser
+    browser: AsyncBrowser
 
     async def scrape_product(
         self,
         item_id: str,
         *,
         store_id: str | None = None,
-        page: Page | None = None
+        page: AsyncPage | None = None
     ) -> WalmartProductData:
         """
         Extract Walmart product data with optional store context.
@@ -431,11 +428,11 @@ class WalmartScraper:
             if should_close_page:
                 await page.close()
 
-    async def _extract_upc(self, page: Page) -> str | None:
+    async def _extract_upc(self, page: AsyncPage) -> str | None:
         """Extract UPC from product page metadata."""
         try:
-            upc = await page.evaluate(
-                """() => {
+            upc = await page.expression(
+                """(() => {
                     // Check JSON-LD structured data
                     const scripts = document.querySelectorAll('script[type="application/ld+json"]');
                     for (const script of scripts) {
@@ -448,8 +445,7 @@ class WalmartScraper:
                     // Check meta tags
                     const upcMeta = document.querySelector('meta[itemprop="gtin13"], meta[itemprop="gtin12"]');
                     return upcMeta ? upcMeta.content : null;
-                }""",
-                return_value=True
+                })()"""
             )
             return upc
         except Exception:
@@ -461,7 +457,7 @@ class WalmartScraper:
         zip_code: str,
         *,
         radius_miles: int = 50,
-        page: Page | None = None
+        page: AsyncPage | None = None
     ) -> list[StoreAvailability]:
         """
         Check inventory at nearby stores for a product.
@@ -531,7 +527,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import TypedDict
 
-from owl_browser import Browser, Page
+from owl_browser import AsyncBrowser, AsyncPage
 
 
 class TargetProductData(TypedDict):
@@ -563,14 +559,14 @@ class TargetScraper:
     fingerprint diversity.
     """
 
-    browser: Browser
+    browser: AsyncBrowser
 
     async def scrape_product(
         self,
         tcin: str,
         *,
         store_id: str | None = None,
-        page: Page | None = None
+        page: AsyncPage | None = None
     ) -> TargetProductData:
         """
         Extract Target product data with optional store context.
@@ -660,7 +656,7 @@ class TargetScraper:
             if should_close_page:
                 await page.close()
 
-    async def _extract_dpci(self, page: Page) -> str | None:
+    async def _extract_dpci(self, page: AsyncPage) -> str | None:
         """Extract DPCI from page."""
         try:
             dpci = await page.ai_extract("The DPCI number shown in product details")
@@ -668,11 +664,11 @@ class TargetScraper:
         except Exception:
             return None
 
-    async def _extract_upc(self, page: Page) -> str | None:
+    async def _extract_upc(self, page: AsyncPage) -> str | None:
         """Extract UPC from structured data."""
         try:
-            return await page.evaluate(
-                """() => {
+            return await page.expression(
+                """(() => {
                     const scripts = document.querySelectorAll('script[type="application/ld+json"]');
                     for (const script of scripts) {
                         try {
@@ -681,8 +677,7 @@ class TargetScraper:
                         } catch {}
                     }
                     return null;
-                }""",
-                return_value=True
+                })()"""
             )
         except Exception:
             return None
@@ -700,7 +695,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import TypedDict, Any
 
-from owl_browser import Browser, Page
+from owl_browser import AsyncBrowser, AsyncPage
 
 
 class GenericProductData(TypedDict):
@@ -732,7 +727,7 @@ class GenericProductScraper:
     to handle unknown page layouts without site-specific rules.
     """
 
-    browser: Browser
+    browser: AsyncBrowser
     extraction_cache: dict[str, dict[str, str]] = field(default_factory=dict)
 
     async def scrape_product(
@@ -740,7 +735,7 @@ class GenericProductScraper:
         url: str,
         *,
         custom_fields: dict[str, str] | None = None,
-        page: Page | None = None
+        page: AsyncPage | None = None
     ) -> GenericProductData:
         """
         Extract product data from any e-commerce product page.
@@ -827,11 +822,11 @@ class GenericProductScraper:
             if should_close_page:
                 await page.close()
 
-    async def _extract_images(self, page: Page) -> list[str]:
+    async def _extract_images(self, page: AsyncPage) -> list[str]:
         """Extract all product images from page."""
         try:
-            return await page.evaluate(
-                """() => {
+            return await page.expression(
+                """(() => {
                     const images = new Set();
                     // Common product image selectors
                     const selectors = [
@@ -851,17 +846,18 @@ class GenericProductScraper:
                         });
                     }
                     return Array.from(images).slice(0, 10);
-                }""",
-                return_value=True
+                })()"""
             ) or []
         except Exception:
             return []
 
-    async def _extract_structured_identifier(self, page: Page, *keys: str) -> str | None:
+    async def _extract_structured_identifier(self, page: AsyncPage, *keys: str) -> str | None:
         """Extract identifier from JSON-LD or meta tags."""
+        keys_json = json.dumps(list(keys))
         try:
-            return await page.evaluate(
-                f"""(keys) => {{
+            return await page.expression(
+                f"""(() => {{
+                    const keys = {keys_json};
                     // Check JSON-LD
                     const scripts = document.querySelectorAll('script[type="application/ld+json"]');
                     for (const script of scripts) {{
@@ -878,9 +874,7 @@ class GenericProductScraper:
                         if (meta?.content) return meta.content;
                     }}
                     return null;
-                }}""",
-                args=list(keys),
-                return_value=True
+                }})()"""
             )
         except Exception:
             return None
@@ -927,7 +921,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import NamedTuple
 
-from owl_browser import Browser, Page
+from owl_browser import AsyncBrowser, AsyncPage
 
 
 class BotProtectionType(StrEnum):
@@ -960,7 +954,7 @@ class BotProtectionDetector:
     protection mechanisms before they trigger blocks.
     """
 
-    async def detect_protection(self, page: Page) -> ProtectionDetectionResult:
+    async def detect_protection(self, page: AsyncPage) -> ProtectionDetectionResult:
         """
         Detect bot protection system on current page.
 
@@ -996,7 +990,7 @@ class BotProtectionDetector:
             confidence=confidence
         )
 
-    async def _check_challenge_page(self, page: Page) -> tuple[bool, str | None]:
+    async def _check_challenge_page(self, page: AsyncPage) -> tuple[bool, str | None]:
         """Check if page is showing a challenge."""
         # Use AI to analyze current page state
         analysis = await page.query_page(
@@ -1058,10 +1052,10 @@ class BotProtectionDetector:
 
         return BotProtectionType.UNKNOWN
 
-    async def _check_dom_markers(self, page: Page) -> BotProtectionType:
+    async def _check_dom_markers(self, page: AsyncPage) -> BotProtectionType:
         """Check DOM for protection system markers."""
-        markers = await page.evaluate(
-            """() => {
+        markers = await page.expression(
+            """(() => {
                 const markers = [];
                 // Check cookies
                 markers.push(document.cookie);
@@ -1070,8 +1064,7 @@ class BotProtectionDetector:
                 // Check hidden inputs
                 document.querySelectorAll('input[type="hidden"]').forEach(i => markers.push(i.name));
                 return markers.join(' ');
-            }""",
-            return_value=True
+            })()"""
         )
 
         markers_lower = markers.lower()
@@ -1099,7 +1092,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Callable, Awaitable
 
-from owl_browser import Browser, Page, ProxyConfig, RemoteConfig
+from owl_browser import AsyncBrowser, AsyncPage, ProxyConfig, RemoteConfig
 
 
 class ProxyTier(StrEnum):
@@ -1133,7 +1126,7 @@ class AntiBotBypass:
     and intelligent retry strategies.
     """
 
-    browser: Browser
+    browser: AsyncBrowser
     proxy_pool: ProxyPool
     max_retries: int = 3
 
@@ -1283,7 +1276,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
 
-from owl_browser import Browser, Page, ProxyConfig
+from owl_browser import AsyncBrowser, AsyncPage, ProxyConfig
 
 
 @dataclass(slots=True)
@@ -1313,7 +1306,7 @@ class FingerprintManager:
     distributions while avoiding banned fingerprint reuse.
     """
 
-    browser: Browser
+    browser: AsyncBrowser
     profiles: dict[str, FingerprintProfile] = field(default_factory=dict)
     max_requests_per_profile: int = 100
     profile_cooldown: timedelta = timedelta(hours=24)
@@ -1508,7 +1501,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import TypedDict, Any
 
-from owl_browser import Browser, Page, ProxyConfig
+from owl_browser import AsyncBrowser, AsyncPage, ProxyConfig
 
 
 class LocationContext(TypedDict):
@@ -1578,12 +1571,12 @@ class GeoLocationManager:
     coordination to achieve accurate location-specific prices.
     """
 
-    browser: Browser
+    browser: AsyncBrowser
     proxy_by_region: dict[str, ProxyConfig] = field(default_factory=dict)
 
     async def set_location_context(
         self,
-        page: Page,
+        page: AsyncPage,
         location: LocationContext,
         retailer: str
     ) -> None:
@@ -1591,7 +1584,7 @@ class GeoLocationManager:
         Configure page for specific location context.
 
         Args:
-            page: Page to configure
+            page: AsyncPage to configure
             location: Target location
             retailer: Retailer identifier for site-specific configuration
         """
@@ -1627,7 +1620,7 @@ class GeoLocationManager:
             }}"""
         )
 
-    async def _set_amazon_location(self, page: Page, location: LocationContext) -> None:
+    async def _set_amazon_location(self, page: AsyncPage, location: LocationContext) -> None:
         """Set Amazon delivery location."""
         # Amazon uses session-context-id and ubid-main cookies
         await page.set_cookie(
@@ -1649,7 +1642,7 @@ class GeoLocationManager:
             }}"""
         )
 
-    async def _set_walmart_location(self, page: Page, location: LocationContext) -> None:
+    async def _set_walmart_location(self, page: AsyncPage, location: LocationContext) -> None:
         """Set Walmart store/delivery location."""
         await page.set_cookie(
             url="https://www.walmart.com",
@@ -1673,7 +1666,7 @@ class GeoLocationManager:
                 path="/"
             )
 
-    async def _set_target_location(self, page: Page, location: LocationContext) -> None:
+    async def _set_target_location(self, page: AsyncPage, location: LocationContext) -> None:
         """Set Target store/delivery location."""
         guest_location = {
             "zipCode": location["zip_code"],
@@ -1698,7 +1691,7 @@ class GeoLocationManager:
             }}"""
         )
 
-    async def _set_bestbuy_location(self, page: Page, location: LocationContext) -> None:
+    async def _set_bestbuy_location(self, page: AsyncPage, location: LocationContext) -> None:
         """Set Best Buy location context."""
         await page.set_cookie(
             url="https://www.bestbuy.com",
@@ -1716,7 +1709,7 @@ class GeoLocationManager:
             path="/"
         )
 
-    async def _set_generic_location(self, page: Page, location: LocationContext) -> None:
+    async def _set_generic_location(self, page: AsyncPage, location: LocationContext) -> None:
         """Generic location setting for unknown retailers."""
         # Common patterns for location storage
         await page.evaluate(
@@ -1816,7 +1809,7 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import TypedDict
 
-from owl_browser import Browser, Page
+from owl_browser import AsyncBrowser, AsyncPage
 
 
 class MatchConfidence(StrEnum):
@@ -1854,15 +1847,15 @@ class ProductMatch(TypedDict):
 class IdentifierExtractor:
     """Extracts product identifiers from pages."""
 
-    async def extract_identifiers(self, page: Page) -> ProductIdentifiers:
+    async def extract_identifiers(self, page: AsyncPage) -> ProductIdentifiers:
         """
         Extract all available product identifiers.
 
         Uses structured data, meta tags, and AI extraction.
         """
         # Try structured data first
-        structured = await page.evaluate(
-            """() => {
+        structured = await page.expression(
+            """(() => {
                 const result = {};
                 const scripts = document.querySelectorAll('script[type="application/ld+json"]');
                 for (const script of scripts) {
@@ -1886,8 +1879,7 @@ class IdentifierExtractor:
                 if (metaSku) result.sku = metaSku.content;
 
                 return result;
-            }""",
-            return_value=True
+            })()"""
         ) or {}
 
         # AI extraction for missing identifiers
@@ -2125,7 +2117,7 @@ import asyncio
 from dataclasses import dataclass
 from decimal import Decimal
 
-from owl_browser import Browser, Page
+from owl_browser import AsyncBrowser, AsyncPage
 
 
 @dataclass(frozen=True, slots=True)
@@ -2136,12 +2128,12 @@ class VisualProductMatcher:
     Compares product images to determine if they represent the same item.
     """
 
-    browser: Browser
+    browser: AsyncBrowser
 
     async def compare_products_visually(
         self,
-        page1: Page,
-        page2: Page
+        page1: AsyncPage,
+        page2: AsyncPage
     ) -> float:
         """
         Compare two product pages visually.
@@ -2182,7 +2174,7 @@ class VisualProductMatcher:
 
     async def find_matching_product(
         self,
-        source_page: Page,
+        source_page: AsyncPage,
         search_url: str,
         retailer: str
     ) -> str | None:
@@ -2190,7 +2182,7 @@ class VisualProductMatcher:
         Find matching product on another retailer via visual search.
 
         Args:
-            source_page: Page with source product
+            source_page: AsyncPage with source product
             search_url: Search URL on target retailer
             retailer: Target retailer name
 
@@ -2241,7 +2233,7 @@ class ProductMatcher:
     Complete product matching engine combining all signals.
     """
 
-    browser: Browser
+    browser: AsyncBrowser
     identifier_extractor: IdentifierExtractor = None
     title_matcher: TitleMatcher = None
     visual_matcher: VisualProductMatcher = None
@@ -2370,7 +2362,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import TypedDict
 
-from owl_browser import Browser, Page
+from owl_browser import AsyncBrowser, AsyncPage
 
 
 class CartItem(TypedDict):
@@ -2413,14 +2405,14 @@ class CartAnalyzer:
     and extract the true cost breakdown.
     """
 
-    browser: Browser
+    browser: AsyncBrowser
 
     async def analyze_cart(
         self,
         product_url: str,
         retailer: str,
         *,
-        page: Page | None = None
+        page: AsyncPage | None = None
     ) -> CartAnalysisResult:
         """
         Perform complete cart analysis for a product.
@@ -2482,7 +2474,7 @@ class CartAnalyzer:
             if should_close_page:
                 await page.close()
 
-    async def _add_to_cart(self, page: Page, retailer: str) -> None:
+    async def _add_to_cart(self, page: AsyncPage, retailer: str) -> None:
         """Add current product to cart."""
         # Use AI-powered click for robustness across layouts
         await page.ai_click("Add to Cart button or Add to Bag button")
@@ -2502,7 +2494,7 @@ class CartAnalyzer:
         except Exception:
             pass
 
-    async def _navigate_to_cart(self, page: Page, retailer: str) -> None:
+    async def _navigate_to_cart(self, page: AsyncPage, retailer: str) -> None:
         """Navigate to cart page."""
         # Retailer-specific cart URLs
         cart_urls = {
@@ -2519,7 +2511,7 @@ class CartAnalyzer:
             await page.ai_click("Shopping cart icon or Cart link")
             await page.wait_for_network_idle(idle_time=2000)
 
-    async def _extract_cart_data(self, page: Page) -> dict:
+    async def _extract_cart_data(self, page: AsyncPage) -> dict:
         """Extract all cart information."""
         return await page.extract_json(template={
             "items": [{
@@ -2538,7 +2530,7 @@ class CartAnalyzer:
 
     async def _detect_hidden_fees(
         self,
-        page: Page,
+        page: AsyncPage,
         cart_data: dict
     ) -> list[dict[str, Decimal]]:
         """Detect hidden fees not shown on product page."""
@@ -2580,7 +2572,7 @@ class CartAnalyzer:
 
     async def _probe_inventory(
         self,
-        page: Page,
+        page: AsyncPage,
         retailer: str
     ) -> dict:
         """Estimate inventory by probing quantity limits."""
@@ -2640,7 +2632,7 @@ class CartAnalyzer:
 
         return result
 
-    async def _clear_cart(self, page: Page, retailer: str) -> None:
+    async def _clear_cart(self, page: AsyncPage, retailer: str) -> None:
         """Remove all items from cart."""
         try:
             # Click remove button for each item
@@ -2656,7 +2648,7 @@ class InventoryProber:
     Advanced inventory estimation using multiple techniques.
     """
 
-    browser: Browser
+    browser: AsyncBrowser
 
     async def estimate_inventory(
         self,
@@ -2746,7 +2738,7 @@ class InventoryProber:
         finally:
             await page.close()
 
-    async def _extract_product_id(self, page: Page, retailer: str) -> str:
+    async def _extract_product_id(self, page: AsyncPage, retailer: str) -> str:
         """Extract product ID from current page."""
         current_url = await page.get_current_url()
 
@@ -4728,7 +4720,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import TypedDict
 
-from owl_browser import Browser, Page
+from owl_browser import AsyncBrowser, AsyncPage
 
 
 class MAPViolation(TypedDict):
@@ -4751,7 +4743,7 @@ class MAPMonitor:
     Tracks reseller pricing and generates evidence for legal teams.
     """
 
-    browser: Browser
+    browser: AsyncBrowser
     map_prices: dict[str, Decimal]  # product_id -> MAP price
 
     async def check_map_compliance(
@@ -4847,7 +4839,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import TypedDict
 
-from owl_browser import Browser, Page
+from owl_browser import AsyncBrowser, AsyncPage
 
 
 class VisualSearchResult(TypedDict):
@@ -4868,7 +4860,7 @@ class VisualProductSearch:
     when no UPC/SKU match is available.
     """
 
-    browser: Browser
+    browser: AsyncBrowser
 
     async def find_product_across_retailers(
         self,

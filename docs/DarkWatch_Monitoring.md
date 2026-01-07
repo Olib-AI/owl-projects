@@ -538,7 +538,7 @@ from datetime import datetime, timezone
 from enum import Enum, auto
 from typing import AsyncIterator, Final, Protocol, TypedDict
 
-from owl_browser import Browser, RemoteConfig, ProxyConfig
+from owl_browser import AsyncBrowser, RemoteConfig, ProxyConfig, AsyncPage
 
 logger = logging.getLogger(__name__)
 
@@ -660,14 +660,14 @@ class TorCrawler:
         self._evidence_dir = evidence_dir
         self._enable_video = enable_video
         self._enable_ai_analysis = enable_ai_analysis
-        self._browser: Browser | None = None
+        self._browser: AsyncBrowser | None = None
 
     async def __aenter__(self) -> TorCrawler:
         remote_config = RemoteConfig(
             url=self._browser_url,
             token=self._browser_token,
         )
-        self._browser = Browser(remote=remote_config)
+        self._browser = AsyncBrowser(remote=remote_config)
         await self._browser.__aenter__()
         return self
 
@@ -1986,7 +1986,7 @@ from pathlib import Path
 from typing import Final
 
 import pyotp
-from owl_browser import Browser, RemoteConfig, ProxyConfig
+from owl_browser import AsyncBrowser, RemoteConfig, ProxyConfig, AsyncPage
 
 logger = logging.getLogger(__name__)
 
@@ -2042,7 +2042,7 @@ class ForumCrawler:
 
     def __init__(
         self,
-        browser: Browser,
+        browser: AsyncBrowser,
         tor_pool: TorPoolManager,
         profiles_dir: str = "/data/profiles",
     ) -> None:
@@ -2440,7 +2440,7 @@ class PaginatedCrawler:
                 await page.wait_for_network_idle(idle_time=3000, timeout=30000)
 
                 # Check if new content loaded
-                current_height = await page.evaluate(
+                current_height = await page.expression(
                     "document.body.scrollHeight"
                 )
 
