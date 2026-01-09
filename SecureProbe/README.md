@@ -31,6 +31,7 @@ Production-ready web vulnerability scanner with 19 specialized analyzers for com
 | `MemoryAssaultAnalyzer` | Memory corruption and buffer overflow patterns |
 | `ChaosTeenAnalyzer` | Fuzzing and malformed input testing |
 | `CredentialSprayAnalyzer` | Credential stuffing and password spray detection |
+| `DeepSniffAnalyzer` | Detects exposed secrets, API keys, JWT tokens, and credentials in JS bundles and API responses using entropy analysis |
 
 ## Installation
 

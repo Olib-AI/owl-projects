@@ -35,6 +35,7 @@ from secureprobe.analyzers import (
     CookieAnalyzer,
     CredentialSprayAnalyzer,
     CryptoAnalyzer,
+    DeepSniffAnalyzer,
     EndpointAnalyzer,
     FormAnalyzer,
     HeaderAnalyzer,
@@ -117,6 +118,7 @@ class AnalyzerPool:
             AnalyzerType.MEMORY_ASSAULT: MemoryAssaultAnalyzer,
             AnalyzerType.CHAOS_TEEN: ChaosTeenAnalyzer,
             AnalyzerType.CREDENTIAL_SPRAY: CredentialSprayAnalyzer,
+            AnalyzerType.DEEP_SNIFF: DeepSniffAnalyzer,
         }
 
         for analyzer_type, analyzer_class in analyzer_classes.items():

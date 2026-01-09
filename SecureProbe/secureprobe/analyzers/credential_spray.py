@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "python-sdk"
 
 from secureprobe.analyzers.base import BaseAnalyzer
 from secureprobe.models import AnalyzerType, Finding, ScanMode, Severity
+from secureprobe.utils import safe_response_text
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -746,8 +747,8 @@ class CredentialSprayAnalyzer(BaseAnalyzer):
                     headers={"User-Agent": self.config.user_agent},
                 )
 
-            response_text = response.text.lower()
-            response_length = len(response.text)
+            response_text = safe_response_text(response).lower()
+            response_length = len(response_text)
             status_code = response.status_code
 
             # Check for lockout

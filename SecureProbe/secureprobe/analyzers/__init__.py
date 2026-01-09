@@ -25,6 +25,7 @@ from secureprobe.analyzers.bloody_mary import BloodyMaryAnalyzer
 from secureprobe.analyzers.memory_assault import MemoryAssaultAnalyzer
 from secureprobe.analyzers.chaos_teen import ChaosTeenAnalyzer
 from secureprobe.analyzers.credential_spray import CredentialSprayAnalyzer
+from secureprobe.analyzers.deep_sniff import DeepSniffAnalyzer
 
 __all__ = [
     "BaseAnalyzer",
@@ -47,4 +48,5 @@ __all__ = [
     "MemoryAssaultAnalyzer",
     "ChaosTeenAnalyzer",
     "CredentialSprayAnalyzer",
+    "DeepSniffAnalyzer",
 ]

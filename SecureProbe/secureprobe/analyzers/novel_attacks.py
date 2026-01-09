@@ -34,6 +34,7 @@ load_dotenv()
 
 from secureprobe.analyzers.base import BaseAnalyzer
 from secureprobe.models import AnalyzerType, Finding
+from secureprobe.utils import safe_response_text
 
 logger = structlog.get_logger(__name__)
 
@@ -250,7 +251,7 @@ class NovelAttacksAnalyzer(BaseAnalyzer):
             try:
                 baseline = await client.get(url)
                 baseline_status = baseline.status_code
-                baseline_body = baseline.text[:500]
+                baseline_body = safe_response_text(baseline)[:500]
             except Exception:
                 return findings
 
@@ -273,7 +274,7 @@ class NovelAttacksAnalyzer(BaseAnalyzer):
                     # If we get a successful response instead of 400/405, parser normalized it
                     if response.status_code in (200, 301, 302, 304) and baseline_status in (200, 301, 302, 304):
                         # Check if response is similar to baseline (method was normalized)
-                        response_body = response.text[:500]
+                        response_body = safe_response_text(response)[:500]
                         if self._similarity_ratio(baseline_body, response_body) > 0.7:
                             findings.append(
                                 self._create_finding(
@@ -561,7 +562,7 @@ class NovelAttacksAnalyzer(BaseAnalyzer):
                     )
 
                     # Check if header is reflected in response
-                    response_text = response.text.lower()
+                    response_text = safe_response_text(response).lower()
                     response_headers = str(response.headers).lower()
 
                     # If we see reflection, this could be exploitable with folding
@@ -752,7 +753,7 @@ class NovelAttacksAnalyzer(BaseAnalyzer):
                     )
 
                     # Check if any reflection of fragment content
-                    response_text = response.text
+                    response_text = safe_response_text(response)
 
                     # If fragment content appears in response (excluding # itself)
                     fragment_value = fragment[1:]  # Remove #
@@ -898,7 +899,7 @@ class NovelAttacksAnalyzer(BaseAnalyzer):
                     )
 
                     # Check for error indicators or reflection
-                    response_text = response.text.lower()
+                    response_text = safe_response_text(response).lower()
 
                     # Signs of vulnerability:
                     # 1. XSS payload in response
@@ -986,7 +987,7 @@ class NovelAttacksAnalyzer(BaseAnalyzer):
                         },
                     )
 
-                    response_text = response.text
+                    response_text = safe_response_text(response)
 
                     # Check for payload reflection
                     # Look for the XSS portion of the payload
@@ -1073,7 +1074,7 @@ class NovelAttacksAnalyzer(BaseAnalyzer):
                     )
 
                     # Check for integer-related error messages
-                    response_text = response.text.lower()
+                    response_text = safe_response_text(response).lower()
                     error_indicators = [
                         "integer overflow",
                         "number format",

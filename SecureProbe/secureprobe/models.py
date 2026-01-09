@@ -62,6 +62,7 @@ class AnalyzerType(StrEnum):
     MEMORY_ASSAULT = "memory_assault"
     CHAOS_TEEN = "chaos_teen"
     CREDENTIAL_SPRAY = "credential_spray"
+    DEEP_SNIFF = "deep_sniff"
 
 
 class ScanMode(StrEnum):

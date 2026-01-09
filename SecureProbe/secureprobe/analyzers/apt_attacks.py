@@ -47,6 +47,7 @@ load_dotenv()
 
 from secureprobe.analyzers.base import BaseAnalyzer  # noqa: E402
 from secureprobe.models import AnalyzerType, Finding, Severity  # noqa: E402
+from secureprobe.utils import safe_response_text  # noqa: E402
 
 logger = structlog.get_logger(__name__)
 
@@ -324,16 +325,17 @@ class APTAttacksAnalyzer(BaseAnalyzer):
                     )
 
                     # Detect smuggling indicators
+                    response_text = safe_response_text(response)
                     smuggling_indicators = [
                         response.status_code == 400,  # Bad request from desync
                         response.status_code == 403,  # Blocked smuggled request
-                        "400 Bad Request" in response.text,
-                        "Request Timeout" in response.text,
+                        "400 Bad Request" in response_text,
+                        "Request Timeout" in response_text,
                         response.elapsed.total_seconds() > 10,  # Timeout from hung request
                     ]
 
                     # Check for response split
-                    if "HTTP/" in response.text[100:]:  # Response within response
+                    if "HTTP/" in response_text[100:]:  # Response within response
                         findings.append(
                             self._create_finding(
                                 severity=Severity.CRITICAL,
@@ -434,7 +436,7 @@ class APTAttacksAnalyzer(BaseAnalyzer):
                     response = await client.get(test_url, headers=poison_headers)
 
                     # Check if header value is reflected in response
-                    value_reflected = header_value in response.text
+                    value_reflected = header_value in safe_response_text(response)
 
                     # Check for redirect to poisoned host
                     redirect_poisoned = False
@@ -560,16 +562,17 @@ class APTAttacksAnalyzer(BaseAnalyzer):
                         )
 
                         # Check for SSRF indicators
+                        response_text = safe_response_text(response)
                         ssrf_indicators = [
                             # AWS metadata
-                            "ami-id" in response.text,
-                            "instance-id" in response.text,
-                            "iam/security-credentials" in response.text,
+                            "ami-id" in response_text,
+                            "instance-id" in response_text,
+                            "iam/security-credentials" in response_text,
                             # GCP metadata
-                            "computeMetadata" in response.text,
+                            "computeMetadata" in response_text,
                             # General indicators
-                            "root:x:" in response.text,  # /etc/passwd
-                            "localhost" in response.text.lower() and len(response.text) > 100,
+                            "root:x:" in response_text,  # /etc/passwd
+                            "localhost" in response_text.lower() and len(response_text) > 100,
                         ]
 
                         if any(ssrf_indicators):
@@ -648,14 +651,15 @@ class APTAttacksAnalyzer(BaseAnalyzer):
                     )
 
                     # Check for pollution indicators
+                    response_text = safe_response_text(response)
                     pollution_indicators = [
                         # Payload reflected back (merged into response)
-                        "__proto__" in response.text,
-                        "constructor" in response.text and "prototype" in response.text,
+                        "__proto__" in response_text,
+                        "constructor" in response_text and "prototype" in response_text,
                         # Server accepted without error
-                        response.status_code in [200, 201] and "admin" in response.text.lower(),
+                        response.status_code in [200, 201] and "admin" in response_text.lower(),
                         # Unexpected privilege escalation
-                        "isAdmin" in response.text,
+                        "isAdmin" in response_text,
                     ]
 
                     # Check if server accepted the payload
@@ -666,7 +670,7 @@ class APTAttacksAnalyzer(BaseAnalyzer):
                             headers={"User-Agent": self.config.user_agent},
                         )
 
-                        if any(pollution_indicators) or "polluted" in followup.text:
+                        if any(pollution_indicators) or "polluted" in safe_response_text(followup):
                             findings.append(
                                 self._create_finding(
                                     severity=Severity.HIGH,
@@ -789,7 +793,7 @@ class APTAttacksAnalyzer(BaseAnalyzer):
                         "cannot be cast",
                     ]
 
-                    response_lower = response.text.lower()
+                    response_lower = safe_response_text(response).lower()
                     for indicator in error_indicators:
                         if indicator.lower() in response_lower:
                             findings.append(
@@ -901,7 +905,7 @@ class APTAttacksAnalyzer(BaseAnalyzer):
                                 metadata={"websocket_path": ws_path},
                             )
                         )
-                    elif response.status_code == 200 and "websocket" in response.text.lower():
+                    elif response.status_code == 200 and "websocket" in safe_response_text(response).lower():
                         # WebSocket endpoint exists
                         findings.append(
                             self._create_finding(
@@ -1408,7 +1412,7 @@ class APTAttacksAnalyzer(BaseAnalyzer):
                     # Check if request was processed (not rejected)
                     if response.status_code in [200, 301, 302]:
                         # Check if malicious host is reflected
-                        host_reflected = malicious_host in response.text
+                        host_reflected = malicious_host in safe_response_text(response)
 
                         if host_reflected:
                             findings.append(

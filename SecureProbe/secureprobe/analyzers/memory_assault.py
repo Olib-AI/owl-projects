@@ -45,6 +45,7 @@ load_dotenv()
 
 from secureprobe.analyzers.base import BaseAnalyzer
 from secureprobe.models import AnalyzerType, Finding, Severity
+from secureprobe.utils import safe_response_text
 
 logger = structlog.get_logger(__name__)
 
@@ -408,7 +409,7 @@ class MemoryAssaultAnalyzer(BaseAnalyzer):
                         # Check for memory exhaustion indicators
                         if response.status_code == 500:
                             error_indicators = ["memory", "stack", "overflow", "recursion"]
-                            response_text = response.text.lower()
+                            response_text = safe_response_text(response).lower()
 
                             if any(ind in response_text for ind in error_indicators):
                                 findings.append(
@@ -423,7 +424,7 @@ class MemoryAssaultAnalyzer(BaseAnalyzer):
                                         cwe_id="CWE-400",
                                         cwe_name="Uncontrolled Resource Consumption",
                                         url=test_url,
-                                        evidence=f"500 error at depth {depth}: {response.text[:200]}",
+                                        evidence=f"500 error at depth {depth}: {response_text[:200]}",
                                         remediation=(
                                             "1. Limit JSON parsing depth (e.g., max 20 levels)\n"
                                             "2. Use streaming JSON parsers\n"
@@ -1090,7 +1091,7 @@ data: *d
                         elapsed_ms = (time.perf_counter() - start) * 1000
 
                         # Check for depth limit enforcement
-                        response_text = response.text.lower()
+                        response_text = safe_response_text(response).lower()
 
                         if "depth" in response_text and "exceeded" in response_text:
                             # Good - depth limit is enforced
@@ -1444,7 +1445,7 @@ data: *d
                         elapsed_ms = (time.perf_counter() - start) * 1000
 
                         if response.status_code == 500:
-                            error_text = response.text.lower()
+                            error_text = safe_response_text(response).lower()
                             memory_indicators = [
                                 "memory", "allocation", "out of", "cannot allocate",
                                 "overflow", "size", "limit"
@@ -1636,7 +1637,7 @@ data: *d
                             elapsed_ms = (time.perf_counter() - start) * 1000
 
                             # Check if payload was executed
-                            response_text = response.text
+                            response_text = safe_response_text(response)
 
                             # If we see many X's, the template was executed
                             if "XXXXX" * 100 in response_text:
@@ -1674,7 +1675,7 @@ data: *d
                                 return findings  # Critical finding - stop
 
                             if response.status_code == 500:
-                                error_text = response.text.lower()
+                                error_text = safe_response_text(response).lower()
                                 memory_indicators = ["memory", "allocation", "heap", "stack"]
 
                                 if any(ind in error_text for ind in memory_indicators):

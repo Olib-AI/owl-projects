@@ -7,17 +7,71 @@ regex pattern matching, and data extraction.
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import math
 import re
 from collections import Counter
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urljoin, urlparse
 
 import structlog
 
+if TYPE_CHECKING:
+    import httpx
+
 logger = structlog.get_logger(__name__)
+
+
+# Gzip magic bytes: 0x1f 0x8b
+_GZIP_MAGIC = b"\x1f\x8b"
+
+
+def safe_response_text(response: "httpx.Response") -> str:
+    """
+    Safely extract text from an HTTP response, handling gzip and encoding issues.
+
+    Handles:
+    - Gzip-compressed content that wasn't auto-decompressed
+    - Binary content that can't be decoded as UTF-8
+    - Charset mismatches
+
+    Args:
+        response: httpx Response object
+
+    Returns:
+        Decoded text content, or empty string if decoding fails
+    """
+    try:
+        # First, try the standard .text property (handles most cases)
+        return response.text
+    except UnicodeDecodeError:
+        pass
+
+    # Get raw content for manual processing
+    content = response.content
+
+    # Check for gzip magic bytes and decompress if needed
+    if content[:2] == _GZIP_MAGIC:
+        try:
+            content = gzip.decompress(content)
+        except (gzip.BadGzipFile, OSError) as e:
+            logger.debug("gzip_decompression_failed", error=str(e))
+
+    # Try decoding with fallback strategies
+    for encoding in ("utf-8", "latin-1", "cp1252"):
+        try:
+            return content.decode(encoding)
+        except (UnicodeDecodeError, LookupError):
+            continue
+
+    # Last resort: decode with error replacement
+    try:
+        return content.decode("utf-8", errors="replace")
+    except Exception as e:
+        logger.warning("response_decode_failed", error=str(e))
+        return ""
 
 
 def calculate_entropy(data: str) -> float:

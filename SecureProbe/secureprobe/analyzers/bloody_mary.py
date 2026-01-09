@@ -42,6 +42,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "python-sdk"
 
 from secureprobe.analyzers.base import BaseAnalyzer
 from secureprobe.models import AnalyzerType, Finding
+from secureprobe.utils import safe_response_text
 
 logger = structlog.get_logger(__name__)
 
@@ -600,9 +601,11 @@ class BloodyMaryAnalyzer(BaseAnalyzer):
                     rsc_evidence.append(f"Marker '{marker}': ...{context}...")
 
         # Look for module references that leak paths
+        # Use non-capturing groups (?:...) for nested groups to ensure
+        # re.findall() returns strings, not tuples
         module_patterns = [
             r'"(file://[^"]+)"',
-            r'"(/[a-zA-Z0-9_/-]+\.(tsx?|jsx?))"',
+            r'"(/[a-zA-Z0-9_/-]+\.(?:tsx?|jsx?))"',
             r'"(@[a-zA-Z0-9_/-]+)"',
             r'"(node_modules/[^"]+)"',
         ]
@@ -863,7 +866,7 @@ class BloodyMaryAnalyzer(BaseAnalyzer):
                             )
 
                         # Check if payload is reflected unescaped
-                        if payload in response.text:
+                        if payload in safe_response_text(response):
                             findings.append(
                                 self._create_finding(
                                     severity="CRITICAL",
@@ -967,7 +970,7 @@ class BloodyMaryAnalyzer(BaseAnalyzer):
                             ]
 
                             for pattern in prop_patterns:
-                                if re.search(pattern, response.text, re.IGNORECASE):
+                                if re.search(pattern, safe_response_text(response), re.IGNORECASE):
                                     findings.append(
                                         self._create_finding(
                                             severity="HIGH",
@@ -1071,7 +1074,7 @@ class BloodyMaryAnalyzer(BaseAnalyzer):
                     response_bodies: list[str] = []
                     for r in responses:
                         if isinstance(r, httpx.Response):
-                            response_bodies.append(r.text[:200])
+                            response_bodies.append(safe_response_text(r)[:200])
 
                     unique_bodies = len(set(response_bodies))
 
@@ -1179,7 +1182,7 @@ class BloodyMaryAnalyzer(BaseAnalyzer):
                     )
 
                     # Check for prototype pollution indicators
-                    response_text = response.text.lower()
+                    response_text = safe_response_text(response).lower()
 
                     # Signs of successful pollution or vulnerable handling
                     pollution_indicators = [
@@ -1288,7 +1291,7 @@ class BloodyMaryAnalyzer(BaseAnalyzer):
 
                         # Check if we reached admin or sensitive content
                         if response.status_code == 200:
-                            response_text = response.text.lower()
+                            response_text = safe_response_text(response).lower()
 
                             admin_indicators = [
                                 "admin",
@@ -1390,7 +1393,7 @@ class BloodyMaryAnalyzer(BaseAnalyzer):
                         },
                     )
 
-                    response_text = response.text.lower()
+                    response_text = safe_response_text(response).lower()
 
                     # Check for type error indicators
                     type_error_indicators = [
@@ -1500,7 +1503,7 @@ class BloodyMaryAnalyzer(BaseAnalyzer):
                         ]
 
                         for pattern in ssr_reflection_patterns:
-                            if re.search(pattern, response.text, re.IGNORECASE):
+                            if re.search(pattern, safe_response_text(response), re.IGNORECASE):
                                 findings.append(
                                     self._create_finding(
                                         severity="HIGH",

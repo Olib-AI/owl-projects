@@ -35,6 +35,7 @@ load_dotenv()
 # Local imports after path setup and env loading  # noqa: E402
 from secureprobe.analyzers.base import BaseAnalyzer  # noqa: E402
 from secureprobe.models import AnalyzerType, Finding, Severity  # noqa: E402
+from secureprobe.utils import safe_response_text  # noqa: E402
 
 logger = structlog.get_logger(__name__)
 
@@ -304,7 +305,7 @@ class ChaosAttacksAnalyzer(BaseAnalyzer):
                             "must be greater than 0",
                         ]
 
-                        response_lower = response.text.lower()
+                        response_lower = safe_response_text(response).lower()
                         has_error = any(ind in response_lower for ind in error_indicators)
 
                         if response.status_code in [200, 201, 302] and not has_error:
@@ -439,7 +440,7 @@ class ChaosAttacksAnalyzer(BaseAnalyzer):
                             "reserved",
                         ]
 
-                        response_lower = response.text.lower()
+                        response_lower = safe_response_text(response).lower()
                         was_rejected = any(
                             ind in response_lower for ind in rejection_indicators
                         )
@@ -565,7 +566,7 @@ class ChaosAttacksAnalyzer(BaseAnalyzer):
                     ]
 
                     for pattern in error_patterns:
-                        if re.search(pattern, response.text, re.IGNORECASE):
+                        if re.search(pattern, safe_response_text(response), re.IGNORECASE):
                             findings.append(
                                 self._create_finding(
                                     severity=Severity.MEDIUM,
@@ -1051,7 +1052,8 @@ class ChaosAttacksAnalyzer(BaseAnalyzer):
 
                         # Check for timeout-like behavior (response took very long)
                         # or error disclosure
-                        if "timeout" in response.text.lower() or "memory" in response.text.lower():
+                        response_text_lower = safe_response_text(response).lower()
+                        if "timeout" in response_text_lower or "memory" in response_text_lower:
                             findings.append(
                                 self._create_finding(
                                     severity=Severity.MEDIUM,
@@ -1266,7 +1268,7 @@ class ChaosAttacksAnalyzer(BaseAnalyzer):
                         data=payload,
                         headers={"User-Agent": self.config.user_agent},
                     )
-                    return response.status_code, response.text[:500]
+                    return response.status_code, safe_response_text(response)[:500]
 
             try:
                 # Submit 10 times simultaneously
@@ -1419,7 +1421,7 @@ class ChaosAttacksAnalyzer(BaseAnalyzer):
                         )
 
                         # Check for successful login indicators
-                        response_lower = response.text.lower()
+                        response_lower = safe_response_text(response).lower()
 
                         # Failure indicators
                         failure_indicators = [
@@ -1539,7 +1541,8 @@ class ChaosAttacksAnalyzer(BaseAnalyzer):
                     )
 
                     original_length = len(html_content)
-                    new_length = len(response.text)
+                    new_response_text = safe_response_text(response)
+                    new_length = len(new_response_text)
 
                     # Check for significant content changes
                     length_diff = abs(new_length - original_length)
@@ -1548,7 +1551,7 @@ class ChaosAttacksAnalyzer(BaseAnalyzer):
                     )
 
                     # Check for debug/admin indicators in new content
-                    new_content_lower = response.text.lower()
+                    new_content_lower = new_response_text.lower()
                     debug_indicators = [
                         "debug",
                         "admin",
@@ -1902,7 +1905,7 @@ class ChaosAttacksAnalyzer(BaseAnalyzer):
 
                     # Check if partial submission was accepted
                     error_indicators = ["required", "missing", "invalid", "error", "please fill"]
-                    has_error = any(ind in response.text.lower() for ind in error_indicators)
+                    has_error = any(ind in safe_response_text(response).lower() for ind in error_indicators)
 
                     if response.status_code in [200, 201, 302] and not has_error:
                         missing = [f for f in all_fields if f not in sparse_data]
@@ -2015,7 +2018,7 @@ class ChaosAttacksAnalyzer(BaseAnalyzer):
                         data={u_field: "testuser", p_field: f"wrongpass{attempt}"},
                         headers={"User-Agent": self.config.user_agent},
                     )
-                    return resp.status_code, resp.text[:500]
+                    return resp.status_code, safe_response_text(resp)[:500]
 
             try:
                 # Fire 100 failed attempts in batches
