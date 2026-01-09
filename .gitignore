@@ -1,2 +1,5 @@
 .DS_Store
 python-sdk
+SecureProbe/.env
+SecureProbe/secureprobe/__pycache__
+SecureProbe/secureprobe/analyzers/__pycache__
