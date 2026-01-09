@@ -1,0 +1,83 @@
+{
+  "name": "@olib-ai/secure-embed",
+  "version": "1.0.0",
+  "description": "Securely embed third-party scripts without hardcoding credentials. Uses Service Worker encryption for runtime credential injection.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./react": {
+      "types": "./dist/react/SecureEmbed.d.ts",
+      "import": "./dist/react/SecureEmbed.js",
+      "default": "./dist/react/SecureEmbed.js"
+    },
+    "./vanilla": {
+      "types": "./dist/vanilla/secure-embed.d.ts",
+      "import": "./dist/vanilla/secure-embed.js",
+      "default": "./dist/vanilla/secure-embed.js"
+    },
+    "./service-worker": {
+      "types": "./dist/service-worker.d.ts",
+      "import": "./dist/service-worker.js",
+      "default": "./dist/service-worker.js"
+    }
+  },
+  "bin": {
+    "secure-embed": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc && npm run build:sw",
+    "build:sw": "esbuild src/service-worker.ts --bundle --format=iife --platform=browser --target=es2022 --outfile=dist/service-worker.js",
+    "dev": "tsc --watch",
+    "demo": "node examples/serve.js",
+    "lint": "eslint src --ext .ts,.tsx",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "security",
+    "embed",
+    "service-worker",
+    "encryption",
+    "credentials",
+    "third-party",
+    "intercom",
+    "analytics",
+    "chat-widget"
+  ],
+  "author": "Olib AI",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Olib-AI/owl-projects.git",
+    "directory": "SecureEmbed"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "peerDependencies": {
+    "react": ">=17.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/react": "^18.2.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.3.0"
+  },
+  "sideEffects": false
+}

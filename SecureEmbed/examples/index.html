@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SecureEmbed - Test Page</title>
+  <style>
+    :root {
+      --bg-primary: #0d1117;
+      --bg-secondary: #161b22;
+      --bg-tertiary: #21262d;
+      --border-color: #30363d;
+      --text-primary: #c9d1d9;
+      --text-secondary: #8b949e;
+      --accent-blue: #58a6ff;
+      --accent-green: #3fb950;
+      --accent-red: #f85149;
+      --accent-yellow: #d29922;
+      --accent-purple: #a371f7;
+    }
+    
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      line-height: 1.6;
+      padding: 2rem;
+      min-height: 100vh;
+    }
+    
+    .container {
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+    
+    header {
+      text-align: center;
+      margin-bottom: 2rem;
+      padding-bottom: 2rem;
+      border-bottom: 1px solid var(--border-color);
+    }
+    
+    h1 {
+      font-size: 2.5rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+    }
+    
+    h1 span {
+      color: var(--accent-blue);
+    }
+    
+    .subtitle {
+      color: var(--text-secondary);
+      font-size: 1.1rem;
+    }
+    
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem;
+      margin-bottom: 2rem;
+    }
+    
+    @media (max-width: 768px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+    
+    .card {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 1.5rem;
+    }
+    
+    .card h2 {
+      font-size: 1.25rem;
+      margin-bottom: 1rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    
+    .status-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.25rem 0.75rem;
+      border-radius: 4px;
+      font-size: 0.875rem;
+      font-weight: 500;
+    }
+    
+    .status-pending {
+      background: rgba(210, 153, 34, 0.15);
+      color: var(--accent-yellow);
+    }
+    
+    .status-success {
+      background: rgba(63, 185, 80, 0.15);
+      color: var(--accent-green);
+    }
+    
+    .status-error {
+      background: rgba(248, 81, 73, 0.15);
+      color: var(--accent-red);
+    }
+    
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+    
+    .status-dot.pulse {
+      animation: pulse 1.5s infinite;
+    }
+    
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+    
+    .step-list {
+      list-style: none;
+    }
+    
+    .step-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.75rem;
+      padding: 0.75rem;
+      margin-bottom: 0.5rem;
+      background: var(--bg-tertiary);
+      border-radius: 6px;
+      border: 1px solid transparent;
+      transition: border-color 0.2s;
+    }
+    
+    .step-item.active {
+      border-color: var(--accent-blue);
+    }
+    
+    .step-item.completed {
+      border-color: var(--accent-green);
+    }
+    
+    .step-item.failed {
+      border-color: var(--accent-red);
+    }
+    
+    .step-icon {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      flex-shrink: 0;
+    }
+    
+    .step-icon.pending {
+      background: var(--bg-primary);
+      border: 2px solid var(--text-secondary);
+      color: var(--text-secondary);
+    }
+    
+    .step-icon.active {
+      background: var(--accent-blue);
+      color: #fff;
+    }
+    
+    .step-icon.completed {
+      background: var(--accent-green);
+      color: #fff;
+    }
+    
+    .step-icon.failed {
+      background: var(--accent-red);
+      color: #fff;
+    }
+    
+    .step-content {
+      flex: 1;
+    }
+    
+    .step-title {
+      font-weight: 500;
+      margin-bottom: 0.25rem;
+    }
+    
+    .step-detail {
+      font-size: 0.875rem;
+      color: var(--text-secondary);
+    }
+    
+    .button-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 0.75rem;
+    }
+    
+    button {
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-color);
+      color: var(--text-primary);
+      padding: 0.75rem 1rem;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.875rem;
+      font-weight: 500;
+      transition: all 0.15s;
+    }
+    
+    button:hover:not(:disabled) {
+      background: var(--border-color);
+      border-color: var(--text-secondary);
+    }
+    
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    
+    button.primary {
+      background: var(--accent-blue);
+      border-color: var(--accent-blue);
+      color: #fff;
+    }
+    
+    button.primary:hover:not(:disabled) {
+      background: #4a94e6;
+    }
+    
+    .console-output {
+      background: #000;
+      border-radius: 6px;
+      padding: 1rem;
+      font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+      font-size: 0.8125rem;
+      line-height: 1.5;
+      max-height: 300px;
+      overflow-y: auto;
+      margin-top: 1rem;
+    }
+    
+    .console-line {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 0.25rem;
+    }
+    
+    .console-time {
+      color: var(--text-secondary);
+      flex-shrink: 0;
+    }
+    
+    .console-msg {
+      word-break: break-word;
+    }
+    
+    .console-msg.info { color: var(--accent-blue); }
+    .console-msg.success { color: var(--accent-green); }
+    .console-msg.error { color: var(--accent-red); }
+    .console-msg.warn { color: var(--accent-yellow); }
+    .console-msg.debug { color: var(--accent-purple); }
+    
+    .crypto-demo {
+      background: var(--bg-tertiary);
+      border-radius: 6px;
+      padding: 1rem;
+      margin-top: 1rem;
+    }
+    
+    .crypto-demo pre {
+      font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+      font-size: 0.75rem;
+      white-space: pre-wrap;
+      word-break: break-all;
+      color: var(--text-secondary);
+      max-height: 150px;
+      overflow-y: auto;
+    }
+    
+    .crypto-demo .label {
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      color: var(--accent-purple);
+    }
+    
+    .info-banner {
+      background: rgba(88, 166, 255, 0.1);
+      border: 1px solid rgba(88, 166, 255, 0.3);
+      border-radius: 6px;
+      padding: 1rem;
+      margin-bottom: 1.5rem;
+      font-size: 0.875rem;
+    }
+    
+    .info-banner code {
+      background: var(--bg-tertiary);
+      padding: 0.125rem 0.375rem;
+      border-radius: 3px;
+      font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+    }
+    
+    .full-width {
+      grid-column: 1 / -1;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1><span>@olib-ai/</span>secure-embed</h1>
+      <p class="subtitle">Securely embed third-party scripts without hardcoding credentials</p>
+    </header>
+    
+    <div class="info-banner">
+      <strong>Test Page</strong> - This demo runs locally on <code>localhost:3000</code>. 
+      The Service Worker will intercept requests and inject decrypted credentials at runtime.
+    </div>
+    
+    <div class="grid">
+      <!-- Service Worker Status -->
+      <div class="card">
+        <h2>
+          Service Worker
+          <span id="sw-status" class="status-indicator status-pending">
+            <span class="status-dot pulse"></span>
+            Checking...
+          </span>
+        </h2>
+        <ul class="step-list" id="sw-steps">
+          <li class="step-item" data-step="support">
+            <span class="step-icon pending">1</span>
+            <div class="step-content">
+              <div class="step-title">Browser Support</div>
+              <div class="step-detail">Checking Service Worker API...</div>
+            </div>
+          </li>
+          <li class="step-item" data-step="secure">
+            <span class="step-icon pending">2</span>
+            <div class="step-content">
+              <div class="step-title">Secure Context</div>
+              <div class="step-detail">Checking HTTPS or localhost...</div>
+            </div>
+          </li>
+          <li class="step-item" data-step="register">
+            <span class="step-icon pending">3</span>
+            <div class="step-content">
+              <div class="step-title">Registration</div>
+              <div class="step-detail">Registering Service Worker...</div>
+            </div>
+          </li>
+          <li class="step-item" data-step="control">
+            <span class="step-icon pending">4</span>
+            <div class="step-content">
+              <div class="step-title">Page Control</div>
+              <div class="step-detail">Waiting for SW to control page...</div>
+            </div>
+          </li>
+        </ul>
+      </div>
+      
+      <!-- Provider Tests -->
+      <div class="card">
+        <h2>Provider Tests</h2>
+        <p style="color: var(--text-secondary); margin-bottom: 1rem; font-size: 0.875rem;">
+          Test different embed providers. Each button simulates loading a provider's embed script.
+        </p>
+        <div class="button-grid">
+          <button onclick="testProvider('intercom')" id="btn-intercom" disabled>Intercom</button>
+          <button onclick="testProvider('crisp')" id="btn-crisp" disabled>Crisp</button>
+          <button onclick="testProvider('hubspot')" id="btn-hubspot" disabled>HubSpot</button>
+          <button onclick="testProvider('drift')" id="btn-drift" disabled>Drift</button>
+          <button onclick="testProvider('google-analytics')" id="btn-google-analytics" disabled>GA4</button>
+          <button onclick="testProvider('mixpanel')" id="btn-mixpanel" disabled>Mixpanel</button>
+          <button onclick="testProvider('segment')" id="btn-segment" disabled>Segment</button>
+          <button onclick="testProvider('custom')" id="btn-custom" disabled>Custom</button>
+        </div>
+      </div>
+      
+      <!-- Encryption Demo -->
+      <div class="card">
+        <h2>Encryption Demo</h2>
+        <p style="color: var(--text-secondary); margin-bottom: 1rem; font-size: 0.875rem;">
+          See how credentials are encrypted and decrypted using AES-256-GCM with domain-bound keys.
+        </p>
+        <button class="primary" onclick="runEncryptionDemo()" id="btn-encrypt">
+          Run Encryption Demo
+        </button>
+        <div class="crypto-demo" id="crypto-output" style="display: none;">
+          <div class="label">Encrypted Config:</div>
+          <pre id="encrypted-data">-</pre>
+          <div class="label" style="margin-top: 1rem;">Decrypted Payload:</div>
+          <pre id="decrypted-data">-</pre>
+        </div>
+      </div>
+      
+      <!-- Health Check -->
+      <div class="card">
+        <h2>Health Check</h2>
+        <p style="color: var(--text-secondary); margin-bottom: 1rem; font-size: 0.875rem;">
+          Verify communication with the Service Worker is functioning correctly.
+        </p>
+        <button onclick="runHealthCheck()" id="btn-health" disabled>
+          Run Health Check
+        </button>
+        <div id="health-result" style="margin-top: 1rem;"></div>
+      </div>
+      
+      <!-- Console Output -->
+      <div class="card full-width">
+        <h2>Console Output</h2>
+        <div class="console-output" id="console">
+          <div class="console-line">
+            <span class="console-time">[00:00:00]</span>
+            <span class="console-msg info">Initializing SecureEmbed test page...</span>
+          </div>
+        </div>
+        <button onclick="clearConsole()" style="margin-top: 1rem;">Clear Console</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    // Import the library from dist
+    import { encryptCredentials, decryptCredentials, verifyIntegrity } from '/dist/crypto.js';
+    import { getProviderConfig, interpolate, providers } from '/dist/providers/index.js';
+
+    // Make functions available globally for button handlers
+    window.encryptCredentials = encryptCredentials;
+    window.decryptCredentials = decryptCredentials;
+    window.verifyIntegrity = verifyIntegrity;
+    window.getProviderConfig = getProviderConfig;
+    window.interpolate = interpolate;
+    window.providers = providers;
+
+    // Console logging
+    const consoleEl = document.getElementById('console');
+    const startTime = Date.now();
+
+    function formatTime() {
+      const elapsed = Date.now() - startTime;
+      const secs = Math.floor(elapsed / 1000);
+      const mins = Math.floor(secs / 60);
+      const hrs = Math.floor(mins / 60);
+      return `[${String(hrs).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}:${String(secs % 60).padStart(2, '0')}]`;
+    }
+
+    window.log = function(msg, type = 'info') {
+      const line = document.createElement('div');
+      line.className = 'console-line';
+      line.innerHTML = `
+        <span class="console-time">${formatTime()}</span>
+        <span class="console-msg ${type}">${escapeHtml(msg)}</span>
+      `;
+      consoleEl.appendChild(line);
+      consoleEl.scrollTop = consoleEl.scrollHeight;
+    };
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    window.clearConsole = function() {
+      consoleEl.innerHTML = '';
+      log('Console cleared', 'debug');
+    };
+
+    // Step management
+    function updateStep(step, status, detail) {
+      const item = document.querySelector(`[data-step="${step}"]`);
+      if (!item) return;
+
+      const icon = item.querySelector('.step-icon');
+      const detailEl = item.querySelector('.step-detail');
+
+      item.className = `step-item ${status}`;
+      icon.className = `step-icon ${status}`;
+
+      if (status === 'completed') {
+        icon.textContent = '✓';
+      } else if (status === 'failed') {
+        icon.textContent = '✕';
+      }
+
+      if (detail) {
+        detailEl.textContent = detail;
+      }
+    }
+
+    function setOverallStatus(status, text) {
+      const el = document.getElementById('sw-status');
+      el.className = `status-indicator status-${status}`;
+      el.innerHTML = `<span class="status-dot ${status === 'pending' ? 'pulse' : ''}"></span>${text}`;
+    }
+
+    // Enable/disable provider buttons
+    function enableProviderButtons(enabled) {
+      const buttons = document.querySelectorAll('.button-grid button');
+      buttons.forEach(btn => btn.disabled = !enabled);
+      document.getElementById('btn-health').disabled = !enabled;
+    }
+
+    // Service Worker initialization
+    async function initServiceWorker() {
+      log('Starting Service Worker initialization...');
+
+      // Step 1: Check browser support
+      updateStep('support', 'active', 'Checking...');
+      if (!('serviceWorker' in navigator)) {
+        updateStep('support', 'failed', 'Not supported in this browser');
+        setOverallStatus('error', 'Not Supported');
+        log('Service Workers are NOT supported in this browser!', 'error');
+        return false;
+      }
+      updateStep('support', 'completed', 'Service Worker API available');
+      log('Service Worker API is available', 'success');
+
+      // Step 2: Check secure context
+      updateStep('secure', 'active', 'Checking...');
+      if (!window.isSecureContext) {
+        updateStep('secure', 'failed', 'Requires HTTPS or localhost');
+        setOverallStatus('error', 'Insecure Context');
+        log('Secure context required! Use HTTPS or localhost.', 'error');
+        return false;
+      }
+      updateStep('secure', 'completed', 'Running in secure context');
+      log('Secure context verified (localhost)', 'success');
+
+      // Step 3: Register Service Worker
+      updateStep('register', 'active', 'Registering...');
+      try {
+        log('Registering Service Worker at /secure-embed-sw.js ...');
+        const registration = await navigator.serviceWorker.register('/secure-embed-sw.js', {
+          scope: '/'
+        });
+        log('Service Worker registered successfully!', 'success');
+        
+        const sw = registration.installing || registration.waiting || registration.active;
+        if (sw) {
+          log(`Service Worker state: ${sw.state}`, 'debug');
+          
+          // Wait for activation if not already active
+          if (sw.state !== 'activated') {
+            log('Waiting for Service Worker activation...', 'debug');
+            await new Promise((resolve, reject) => {
+              const timeout = setTimeout(() => reject(new Error('Activation timeout')), 10000);
+              sw.addEventListener('statechange', () => {
+                log(`Service Worker state changed to: ${sw.state}`, 'debug');
+                if (sw.state === 'activated') {
+                  clearTimeout(timeout);
+                  resolve();
+                }
+              });
+            });
+          }
+        }
+        
+        updateStep('register', 'completed', 'Registration successful');
+        log('Service Worker is now active', 'success');
+      } catch (err) {
+        updateStep('register', 'failed', err.message);
+        setOverallStatus('error', 'Registration Failed');
+        log(`Registration failed: ${err.message}`, 'error');
+        return false;
+      }
+
+      // Step 4: Wait for page control
+      updateStep('control', 'active', 'Waiting for control...');
+      if (navigator.serviceWorker.controller) {
+        updateStep('control', 'completed', 'Page is controlled');
+        log('Service Worker is controlling this page', 'success');
+      } else {
+        log('Waiting for Service Worker to take control...', 'debug');
+        try {
+          await new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => reject(new Error('Control timeout')), 5000);
+            
+            const handler = () => {
+              if (navigator.serviceWorker.controller) {
+                clearTimeout(timeout);
+                navigator.serviceWorker.removeEventListener('controllerchange', handler);
+                resolve();
+              }
+            };
+            
+            navigator.serviceWorker.addEventListener('controllerchange', handler);
+            
+            // Also check immediately
+            if (navigator.serviceWorker.controller) {
+              clearTimeout(timeout);
+              resolve();
+            }
+          });
+          updateStep('control', 'completed', 'Page is now controlled');
+          log('Service Worker now controls this page', 'success');
+        } catch (err) {
+          updateStep('control', 'failed', 'Refresh page to retry');
+          setOverallStatus('error', 'Control Failed');
+          log('Service Worker not controlling page. Please refresh!', 'warn');
+          return false;
+        }
+      }
+
+      setOverallStatus('success', 'Ready');
+      log('SecureEmbed is ready!', 'success');
+      enableProviderButtons(true);
+      return true;
+    }
+
+    // Test a provider
+    window.testProvider = async function(provider) {
+      log(`Testing provider: ${provider}`, 'info');
+      
+      try {
+        const config = getProviderConfig(provider);
+        log(`Provider config loaded for ${provider}`, 'debug');
+        log(`Script URL template: ${config.scriptUrl}`, 'debug');
+        log(`Intercept patterns: ${config.interceptPatterns.join(', ') || 'none'}`, 'debug');
+        
+        // Create a test encrypted config
+        const testCredentials = {
+          apiKey: `test_${provider}_key_${Date.now()}`,
+          apiSecret: 'test_secret_abc123',
+          metadata: {
+            portalId: '12345678',
+            embedId: 'embed_test'
+          }
+        };
+
+        log('Encrypting test credentials...', 'debug');
+        const encrypted = await encryptCredentials(
+          testCredentials,
+          ['localhost', '127.0.0.1'],
+          provider
+        );
+        
+        log('Credentials encrypted successfully', 'success');
+        log(`Encrypted payload size: ${encrypted.encryptedPayload.length} bytes`, 'debug');
+        
+        // Verify integrity
+        const isValid = await verifyIntegrity(encrypted);
+        log(`Integrity verification: ${isValid ? 'PASSED' : 'FAILED'}`, isValid ? 'success' : 'error');
+        
+        // Decrypt
+        log('Decrypting credentials...', 'debug');
+        const decrypted = await decryptCredentials(encrypted, 'localhost');
+        log('Credentials decrypted successfully', 'success');
+        log(`Decrypted API Key: ${decrypted.apiKey.substring(0, 20)}...`, 'debug');
+        
+        // Build final script URL
+        const variables = {
+          apiKey: decrypted.apiKey,
+          appId: decrypted.apiKey,
+          portalId: decrypted.metadata?.portalId ?? '',
+          embedId: decrypted.metadata?.embedId ?? '',
+          scriptUrl: config.scriptUrl,
+          initScript: config.initScript || ''
+        };
+        
+        const finalUrl = interpolate(config.scriptUrl, variables);
+        log(`Final script URL: ${finalUrl}`, 'success');
+        
+        log(`Provider ${provider} test completed successfully!`, 'success');
+        
+      } catch (err) {
+        log(`Provider test failed: ${err.message}`, 'error');
+      }
+    };
+
+    // Encryption demo
+    window.runEncryptionDemo = async function() {
+      const outputEl = document.getElementById('crypto-output');
+      const encryptedEl = document.getElementById('encrypted-data');
+      const decryptedEl = document.getElementById('decrypted-data');
+      
+      outputEl.style.display = 'block';
+      log('Running encryption demo...', 'info');
+      
+      try {
+        const payload = {
+          apiKey: 'demo_api_key_xyz789',
+          apiSecret: 'demo_secret_abc123',
+          metadata: {
+            appId: 'app_001',
+            environment: 'development'
+          }
+        };
+        
+        log('Original payload: ' + JSON.stringify(payload), 'debug');
+        
+        // Encrypt
+        log('Encrypting with AES-256-GCM...', 'debug');
+        const encrypted = await encryptCredentials(
+          payload,
+          ['localhost', '127.0.0.1', 'example.com'],
+          'custom'
+        );
+        
+        encryptedEl.textContent = JSON.stringify(encrypted, null, 2);
+        log('Encryption complete!', 'success');
+        log(`IV: ${encrypted.iv}`, 'debug');
+        log(`Salt: ${encrypted.salt}`, 'debug');
+        log(`Payload (base64): ${encrypted.encryptedPayload.substring(0, 40)}...`, 'debug');
+        
+        // Verify integrity
+        const isValid = await verifyIntegrity(encrypted);
+        log(`Integrity hash: ${encrypted.integrity?.substring(0, 30)}...`, 'debug');
+        log(`Integrity verification: ${isValid ? 'PASSED' : 'FAILED'}`, isValid ? 'success' : 'error');
+        
+        // Decrypt
+        log('Decrypting...', 'debug');
+        const decrypted = await decryptCredentials(encrypted, 'localhost');
+        
+        decryptedEl.textContent = JSON.stringify(decrypted, null, 2);
+        log('Decryption complete!', 'success');
+        log('Full encrypt -> decrypt cycle successful!', 'success');
+        
+        // Try decrypting from wrong domain (should fail)
+        log('Testing unauthorized domain...', 'debug');
+        try {
+          await decryptCredentials(encrypted, 'attacker.com');
+          log('ERROR: Should have rejected unauthorized domain!', 'error');
+        } catch (e) {
+          log('Correctly rejected unauthorized domain: ' + e.message, 'success');
+        }
+        
+      } catch (err) {
+        log(`Encryption demo failed: ${err.message}`, 'error');
+        encryptedEl.textContent = 'Error: ' + err.message;
+        decryptedEl.textContent = '-';
+      }
+    };
+
+    // Health check
+    window.runHealthCheck = async function() {
+      const resultEl = document.getElementById('health-result');
+      log('Running health check...', 'info');
+      
+      const sw = navigator.serviceWorker.controller;
+      if (!sw) {
+        resultEl.innerHTML = '<span class="status-indicator status-error"><span class="status-dot"></span>No SW Controller</span>';
+        log('Health check failed: No Service Worker controller', 'error');
+        return;
+      }
+      
+      try {
+        const channel = new MessageChannel();
+        const response = await new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => reject(new Error('Timeout')), 5000);
+          channel.port1.onmessage = (event) => {
+            clearTimeout(timeout);
+            resolve(event.data);
+          };
+          sw.postMessage({ type: 'HEALTH_CHECK' }, [channel.port2]);
+        });
+        
+        if (response.success) {
+          resultEl.innerHTML = '<span class="status-indicator status-success"><span class="status-dot"></span>Healthy</span>';
+          log('Health check passed!', 'success');
+        } else {
+          resultEl.innerHTML = '<span class="status-indicator status-error"><span class="status-dot"></span>Unhealthy</span>';
+          log('Health check failed: ' + (response.error || 'Unknown error'), 'error');
+        }
+      } catch (err) {
+        resultEl.innerHTML = '<span class="status-indicator status-error"><span class="status-dot"></span>Error</span>';
+        log('Health check error: ' + err.message, 'error');
+      }
+    };
+
+    // Initialize on load
+    document.addEventListener('DOMContentLoaded', () => {
+      initServiceWorker();
+    });
+
+    // Also start immediately if DOM is ready
+    if (document.readyState !== 'loading') {
+      initServiceWorker();
+    }
+  </script>
+</body>
+</html>

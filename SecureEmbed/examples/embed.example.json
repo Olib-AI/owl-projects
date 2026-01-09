@@ -1,0 +1,11 @@
+{
+  "provider": "intercom",
+  "credentials": {
+    "apiKey": "your-intercom-app-id",
+    "metadata": {
+      "appId": "your-intercom-app-id"
+    }
+  },
+  "authorizedDomains": ["example.com", "www.example.com", "localhost"],
+  "expiresAt": "2026-12-31T23:59:59Z"
+}

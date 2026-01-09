@@ -3,3 +3,5 @@ python-sdk
 SecureProbe/.env
 SecureProbe/secureprobe/__pycache__
 SecureProbe/secureprobe/analyzers/__pycache__
+SecureEmbed/node_modules
+SecureEmbed/dist

@@ -1,0 +1,8 @@
+{
+  "provider": "custom",
+  "credentials": {
+    "apiKey": "test_key_12345",
+    "appId": "app_67890"
+  },
+  "allowedDomains": ["localhost", "127.0.0.1"]
+}
