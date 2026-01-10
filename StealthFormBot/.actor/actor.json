@@ -1,0 +1,24 @@
+{
+    "actorSpecification": 1,
+    "name": "stealth-form-bot",
+    "title": "StealthFormBot - Enterprise Form Submission",
+    "description": "Enterprise-grade form automation actor with sophisticated anti-detection. Handles multi-step forms, file uploads, CAPTCHAs, and dynamic JavaScript forms while evading bot detection systems.",
+    "version": "1.0",
+    "buildTag": "latest",
+    "meta": {
+        "templateId": "python-start"
+    },
+    "input": "./input_schema.json",
+    "dockerfile": "../Dockerfile",
+    "categories": [
+        "AUTOMATION",
+        "MARKETING"
+    ],
+    "seoTitle": "Form Submission Bot with Anti-Detection | Apify Actor",
+    "seoDescription": "Automate form submissions across websites with sophisticated anti-detection measures. Handles multi-step forms, file uploads, CAPTCHAs, and dynamic JavaScript forms.",
+    "authors": [
+        "Olib AI"
+    ],
+    "isPublic": true,
+    "usesStandbyMode": false
+}

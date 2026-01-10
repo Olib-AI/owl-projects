@@ -1,0 +1,13 @@
+# Apify SDK for actor functionality
+apify>=1.7.0
+
+# HTTP client
+httpx>=0.25.0
+
+# Data validation
+pydantic>=2.5.0
+
+# Environment variable management
+python-dotenv>=1.0.0
+
+# Note: owl-browser SDK is installed from local path in Dockerfile

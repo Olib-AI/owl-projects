@@ -5,3 +5,7 @@ SecureProbe/secureprobe/__pycache__
 SecureProbe/secureprobe/analyzers/__pycache__
 SecureEmbed/node_modules
 SecureEmbed/dist
+StealthFormBot/__pycache__
+StealthFormBot/.env
+.env
+StealthFormBot/owl_browser_sdk/owl_browser/__pycache__

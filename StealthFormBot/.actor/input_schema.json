@@ -1,0 +1,196 @@
+{
+    "title": "StealthFormBot Input",
+    "description": "Configuration for enterprise form submission with anti-detection capabilities",
+    "type": "object",
+    "schemaVersion": 1,
+    "required": ["targetUrl"],
+    "properties": {
+        "targetUrl": {
+            "title": "Target URL",
+            "description": "The URL of the form to submit",
+            "type": "string",
+            "editor": "textfield",
+            "prefill": "https://httpbin.org/forms/post"
+        },
+        "formData": {
+            "title": "Form Data (Simple)",
+            "description": "Simple key-value mapping of field names/selectors to values. Example: {\"custname\": \"John Doe\", \"custemail\": \"john@example.com\"}. The actor will auto-detect field types.",
+            "type": "object",
+            "editor": "json",
+            "prefill": {
+                "custname": "John Doe",
+                "custemail": "john@example.com"
+            }
+        },
+        "fieldConfigs": {
+            "title": "Advanced Field Configurations (JSON Array)",
+            "description": "Array of detailed field configs for complex forms. Each object: {\"selector\": \"#field\", \"value\": \"text\", \"fieldType\": \"text|email|select|checkbox|radio|textarea|date|file\", \"waitBefore\": 0, \"clearFirst\": true}. Overrides formData when provided.",
+            "type": "array",
+            "editor": "json",
+            "prefill": [
+                {
+                    "selector": "#name",
+                    "value": "John Doe",
+                    "fieldType": "text"
+                },
+                {
+                    "selector": "#email",
+                    "value": "john@example.com",
+                    "fieldType": "email"
+                }
+            ]
+        },
+        "steps": {
+            "title": "Multi-Step Form Configuration (JSON Array)",
+            "description": "Array of step configs for wizard forms. Each step: {\"name\": \"Step 1\", \"fields\": [{\"selector\": \"...\", \"value\": \"...\"}], \"nextSelector\": \"button.next\", \"waitCondition\": \"networkidle\", \"waitTimeout\": 10000}",
+            "type": "array",
+            "editor": "json",
+            "prefill": []
+        },
+        "submitSelector": {
+            "title": "Submit Button Selector",
+            "description": "CSS selector for the submit button. If not provided, common patterns will be tried.",
+            "type": "string",
+            "editor": "textfield",
+            "prefill": "button[type='submit']"
+        },
+        "login": {
+            "title": "Login Configuration (JSON Object)",
+            "description": "Login config: {\"url\": \"https://...\", \"usernameSelector\": \"#user\", \"passwordSelector\": \"#pass\", \"username\": \"user\", \"password\": \"pass\", \"submitSelector\": \"button\", \"successIndicator\": \".dashboard\", \"waitTimeout\": 15000}",
+            "type": "object",
+            "editor": "json",
+            "prefill": {}
+        },
+        "useApifyProxy": {
+            "title": "Use Apify Proxy",
+            "description": "Enable Apify's built-in proxy service for better anti-detection. Apify proxy provides datacenter and residential IPs. Takes precedence over custom proxy if both are configured.",
+            "type": "boolean",
+            "default": false,
+            "sectionCaption": "Proxy Configuration",
+            "sectionDescription": "Configure proxy settings. Choose between Apify's proxy service or a custom proxy server."
+        },
+        "apifyProxyGroups": {
+            "title": "Apify Proxy Groups",
+            "description": "Proxy groups to use (e.g., RESIDENTIAL, SHADER). Leave empty for default datacenter proxies. Available groups depend on your Apify subscription.",
+            "type": "array",
+            "editor": "stringList",
+            "prefill": []
+        },
+        "apifyProxyCountry": {
+            "title": "Apify Proxy Country",
+            "description": "Two-letter country code for geo-targeting (e.g., US, DE, GB). Leave empty for automatic selection.",
+            "type": "string",
+            "editor": "textfield"
+        },
+        "proxy": {
+            "title": "Custom Proxy Configuration (JSON Object)",
+            "description": "Custom proxy settings (used only if Apify Proxy is disabled): {\"type\": \"http|https|socks5\", \"host\": \"proxy.example.com\", \"port\": 8080, \"username\": \"user\", \"password\": \"pass\", \"timezoneOverride\": \"America/New_York\", \"languageOverride\": \"en-US\"}",
+            "type": "object",
+            "editor": "json",
+            "prefill": {}
+        },
+        "profilePath": {
+            "title": "Browser Profile Path",
+            "description": "Path to a persistent browser profile for maintaining identity across runs",
+            "type": "string",
+            "editor": "textfield"
+        },
+        "retry": {
+            "title": "Retry Configuration (JSON Object)",
+            "description": "Retry settings: {\"maxRetries\": 3, \"retryDelay\": 1000, \"exponentialBackoff\": true, \"retryOn\": [\"timeout\", \"element_not_found\"]}",
+            "type": "object",
+            "editor": "json",
+            "prefill": {
+                "maxRetries": 3,
+                "retryDelay": 1000,
+                "exponentialBackoff": true,
+                "retryOn": ["timeout", "element_not_found"]
+            }
+        },
+        "retryOnErrors": {
+            "title": "Retry On Error Types",
+            "description": "List of error types that should trigger a retry (e.g., timeout, element_not_found, navigation_failed)",
+            "type": "array",
+            "editor": "stringList",
+            "prefill": ["timeout", "element_not_found"]
+        },
+        "navigationTimeout": {
+            "title": "Navigation Timeout (ms)",
+            "description": "Timeout for page navigation in milliseconds",
+            "type": "integer",
+            "default": 30000,
+            "minimum": 5000,
+            "maximum": 120000
+        },
+        "fieldTimeout": {
+            "title": "Field Timeout (ms)",
+            "description": "Timeout for finding and filling fields in milliseconds",
+            "type": "integer",
+            "default": 5000,
+            "minimum": 1000,
+            "maximum": 30000
+        },
+        "screenshotBeforeSubmit": {
+            "title": "Screenshot Before Submit",
+            "description": "Take a screenshot before submitting the form",
+            "type": "boolean",
+            "default": true
+        },
+        "screenshotAfterSubmit": {
+            "title": "Screenshot After Submit",
+            "description": "Take a screenshot after submitting the form",
+            "type": "boolean",
+            "default": true
+        },
+        "screenshotOnError": {
+            "title": "Screenshot On Error",
+            "description": "Take a screenshot when an error occurs",
+            "type": "boolean",
+            "default": true
+        },
+        "autoAcceptAlerts": {
+            "title": "Auto Accept Alerts",
+            "description": "Automatically accept JavaScript alert dialogs",
+            "type": "boolean",
+            "default": true
+        },
+        "autoAcceptConfirms": {
+            "title": "Auto Accept Confirms",
+            "description": "Automatically accept JavaScript confirm dialogs",
+            "type": "boolean",
+            "default": true
+        },
+        "successIndicator": {
+            "title": "Success Indicator Selector",
+            "description": "CSS selector that appears on successful submission",
+            "type": "string",
+            "editor": "textfield"
+        },
+        "successUrlPattern": {
+            "title": "Success URL Pattern",
+            "description": "URL pattern that indicates successful submission",
+            "type": "string",
+            "editor": "textfield"
+        },
+        "owlBrowserUrl": {
+            "title": "Owl Browser URL",
+            "description": "URL of the Owl Browser service",
+            "type": "string",
+            "editor": "textfield",
+            "default": "http://localhost:8080"
+        },
+        "owlBrowserToken": {
+            "title": "Owl Browser Token",
+            "description": "Authentication token for Owl Browser service",
+            "type": "string",
+            "editor": "textfield",
+            "isSecret": true
+        },
+        "verbose": {
+            "title": "Verbose Logging",
+            "description": "Enable detailed debug logging",
+            "type": "boolean",
+            "default": false
+        }
+    }
+}
