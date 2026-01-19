@@ -2,7 +2,7 @@
 Utility functions for SecureProbe scanner.
 
 Provides common utilities for URL handling, entropy calculation,
-regex pattern matching, and data extraction.
+regex pattern matching, data extraction, and browser helper functions.
 """
 
 from __future__ import annotations
@@ -10,8 +10,11 @@ from __future__ import annotations
 import gzip
 import hashlib
 import math
+import os
 import re
 from collections import Counter
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urljoin, urlparse
@@ -20,8 +23,101 @@ import structlog
 
 if TYPE_CHECKING:
     import httpx
+    from owl_browser import OwlBrowser
 
 logger = structlog.get_logger(__name__)
+
+
+class BrowserConfigError(Exception):
+    """Raised when browser configuration is missing or invalid."""
+
+    pass
+
+
+def get_browser_config() -> tuple[str, str]:
+    """
+    Get browser configuration from environment variables.
+
+    Returns:
+        Tuple of (url, token) for browser connection.
+
+    Raises:
+        BrowserConfigError: If required environment variables are not set.
+    """
+    remote_url = os.getenv("OWL_BROWSER_URL")
+    remote_token = os.getenv("OWL_BROWSER_TOKEN")
+
+    if not remote_url or not remote_token:
+        raise BrowserConfigError(
+            "OWL_BROWSER_URL and OWL_BROWSER_TOKEN environment variables are required. "
+            "SDK v2 requires remote browser connection."
+        )
+
+    return remote_url, remote_token
+
+
+@asynccontextmanager
+async def get_browser() -> AsyncIterator["OwlBrowser"]:
+    """
+    Async context manager for browser instance.
+
+    Creates and manages an OwlBrowser instance with proper lifecycle management.
+
+    Yields:
+        Connected OwlBrowser instance.
+
+    Raises:
+        BrowserConfigError: If required environment variables are not set.
+
+    Example:
+        async with get_browser() as browser:
+            ctx = await browser.create_context()
+            context_id = ctx["context_id"]
+            await browser.navigate(context_id=context_id, url="https://example.com")
+            await browser.close_context(context_id=context_id)
+    """
+    from owl_browser import OwlBrowser, RemoteConfig
+
+    url, token = get_browser_config()
+
+    logger.debug(
+        "connecting_to_browser",
+        remote_url=url,
+        has_token=bool(token),
+    )
+
+    config = RemoteConfig(url=url, token=token, api_prefix="")
+    async with OwlBrowser(config) as browser:
+        yield browser
+
+
+@asynccontextmanager
+async def browser_context(browser: "OwlBrowser") -> AsyncIterator[str]:
+    """
+    Async context manager for a browser context within an existing browser instance.
+
+    Creates a context and ensures it's closed when done.
+
+    Args:
+        browser: Connected OwlBrowser instance.
+
+    Yields:
+        Context ID string.
+
+    Example:
+        async with get_browser() as browser:
+            async with browser_context(browser) as context_id:
+                await browser.navigate(context_id=context_id, url="https://example.com")
+    """
+    ctx = await browser.create_context()
+    context_id: str = ctx["context_id"]
+    try:
+        yield context_id
+    finally:
+        try:
+            await browser.close_context(context_id=context_id)
+        except Exception as e:
+            logger.debug("context_close_error", context_id=context_id, error=str(e))
 
 
 # Gzip magic bytes: 0x1f 0x8b

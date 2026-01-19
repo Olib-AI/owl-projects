@@ -6,10 +6,16 @@ Provides:
 - Login form detection and authentication
 - Element discovery with semantic descriptions
 - YAML test generation compatible with TestRunner
+
+SDK v2 Notes:
+- Uses OwlBrowser instead of Browser
+- All browser operations are async and require context_id
+- build() method is now async
 """
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import re
 import time
@@ -23,7 +29,7 @@ import structlog
 import yaml
 
 if TYPE_CHECKING:
-    from owl_browser import Browser, BrowserContext
+    from owl_browser import OwlBrowser
 
 logger = structlog.get_logger(__name__)
 
@@ -146,7 +152,7 @@ class AutoTestBuilder:
 
     def __init__(
         self,
-        browser: Browser,
+        browser: OwlBrowser,
         config: BuilderConfig,
     ) -> None:
         self._browser = browser
@@ -156,9 +162,14 @@ class AutoTestBuilder:
         self._page_analyses: list[PageAnalysis] = []
         self._base_domain: str = urlparse(config.url).netloc
 
-    def build(self) -> str:
+    async def build(self) -> str:
         """
         Build a complete YAML test specification.
+
+        SDK v2 Notes:
+            - Async method
+            - Creates and manages its own context
+            - Uses navigate instead of goto
 
         Returns:
             YAML string containing the test specification
@@ -169,18 +180,20 @@ class AutoTestBuilder:
             depth=self._config.depth,
         )
 
-        page = self._browser.new_page()
+        # Create a new context for the build
+        ctx = await self._browser.create_context()
+        context_id = ctx["context_id"]
 
         try:
             # Navigate to initial URL
-            self._navigate_with_wait(page, self._config.url)
+            await self._navigate_with_wait(context_id, self._config.url)
 
             # Handle authentication if credentials provided
             if self._config.username and self._config.password:
-                self._handle_authentication(page)
+                await self._handle_authentication(context_id)
 
             # Crawl and analyze pages
-            self._crawl_pages(page, self._config.url, depth=0)
+            await self._crawl_pages(context_id, self._config.url, depth=0)
 
             # Generate YAML spec
             yaml_content = self._generate_yaml_spec()
@@ -194,21 +207,27 @@ class AutoTestBuilder:
             return yaml_content
 
         finally:
-            page.close()
+            await self._browser.close_context(context_id=context_id)
 
-    def _navigate_with_wait(self, page: BrowserContext, url: str) -> None:
+    async def _navigate_with_wait(self, context_id: str, url: str) -> None:
         """Navigate to URL and wait for stability."""
         # Use domcontentloaded instead of load for faster navigation
         # domcontentloaded fires when HTML is parsed, before images/styles finish
-        page.goto(url, wait_until="domcontentloaded", timeout=self._config.timeout_ms)
+        await self._browser.navigate(
+            context_id=context_id,
+            url=url,
+            wait_until="domcontentloaded",
+            timeout=self._config.timeout_ms,
+        )
         # Short network idle wait to ensure key resources are loaded
         with contextlib.suppress(Exception):
-            page.wait_for_network_idle(
+            await self._browser.wait_for_network_idle(
+                context_id=context_id,
                 idle_time=200,
                 timeout=2000,
             )
 
-    def _handle_authentication(self, page: BrowserContext) -> bool:
+    async def _handle_authentication(self, context_id: str) -> bool:
         """
         Detect and fill login form if present.
 
@@ -217,7 +236,7 @@ class AutoTestBuilder:
         """
         self._log.info("Checking for login form")
 
-        analysis = self._analyze_page(page)
+        analysis = await self._analyze_page(context_id)
 
         if not analysis.has_login_form or not analysis.login_form_info:
             self._log.info("No login form detected")
@@ -234,34 +253,48 @@ class AutoTestBuilder:
 
         try:
             # Fill username
-            page.type(username_selector, self._config.username or "")
-            time.sleep(0.2)
+            await self._browser.type_(
+                context_id=context_id,
+                selector=username_selector,
+                text=self._config.username or "",
+            )
+            await asyncio.sleep(0.2)
 
             # Fill password
-            page.type(password_selector, self._config.password or "")
-            time.sleep(0.2)
+            await self._browser.type_(
+                context_id=context_id,
+                selector=password_selector,
+                text=self._config.password or "",
+            )
+            await asyncio.sleep(0.2)
 
             # Submit form
             if submit_selector:
-                page.click(submit_selector)
+                await self._browser.click(context_id=context_id, selector=submit_selector)
             else:
-                page.press_key("Enter")
+                await self._browser.press_key(context_id=context_id, key="Enter")
 
             # Wait for navigation/response
-            time.sleep(2)
+            await asyncio.sleep(2)
             with contextlib.suppress(Exception):
-                page.wait_for_network_idle(idle_time=500, timeout=5000)
+                await self._browser.wait_for_network_idle(
+                    context_id=context_id,
+                    idle_time=500,
+                    timeout=5000,
+                )
 
-            self._log.info("Login form submitted", url=page.get_current_url())
+            page_info = await self._browser.get_page_info(context_id=context_id)
+            current_url = page_info.get("url") if isinstance(page_info, dict) else "unknown"
+            self._log.info("Login form submitted", url=current_url)
             return True
 
         except Exception as e:
             self._log.error("Failed to complete login", error=str(e))
             return False
 
-    def _crawl_pages(
+    async def _crawl_pages(
         self,
-        page: BrowserContext,
+        context_id: str,
         url: str,
         depth: int,
     ) -> None:
@@ -290,16 +323,17 @@ class AutoTestBuilder:
         self._visited_urls.add(normalized_url)
 
         # Navigate if not already on this page
-        current_url = page.get_current_url()
+        page_info = await self._browser.get_page_info(context_id=context_id)
+        current_url = page_info.get("url") if isinstance(page_info, dict) else ""
         if self._normalize_url(current_url) != normalized_url:
             try:
-                self._navigate_with_wait(page, url)
+                await self._navigate_with_wait(context_id, url)
             except Exception as e:
                 self._log.warning("Failed to navigate", url=url, error=str(e))
                 return
 
         # Analyze current page
-        analysis = self._analyze_page(page)
+        analysis = await self._analyze_page(context_id)
         self._page_analyses.append(analysis)
 
         self._log.info(
@@ -324,12 +358,13 @@ class AutoTestBuilder:
                 if len(self._visited_urls) >= self._config.max_pages:
                     break
                 absolute_url = urljoin(url, child_url)
-                self._crawl_pages(page, absolute_url, depth + 1)
+                await self._crawl_pages(context_id, absolute_url, depth + 1)
 
-    def _analyze_page(self, page: BrowserContext) -> PageAnalysis:
+    async def _analyze_page(self, context_id: str) -> PageAnalysis:
         """Perform complete analysis of current page."""
-        url = page.get_current_url()
-        title = page.get_title() or "Untitled"
+        page_info = await self._browser.get_page_info(context_id=context_id)
+        url = page_info.get("url", "") if isinstance(page_info, dict) else ""
+        title = page_info.get("title", "Untitled") if isinstance(page_info, dict) else "Untitled"
 
         analysis = PageAnalysis(
             url=url,
@@ -339,7 +374,7 @@ class AutoTestBuilder:
 
         try:
             # Discover all elements
-            analysis.elements = self._discover_elements(page)
+            analysis.elements = await self._discover_elements(context_id)
 
             # Separate navigation links
             analysis.navigation_links = [
@@ -348,10 +383,10 @@ class AutoTestBuilder:
             ]
 
             # Detect forms
-            analysis.forms = self._discover_forms(page, analysis.elements)
+            analysis.forms = await self._discover_forms(context_id, analysis.elements)
 
             # Check for login form
-            login_info = self._detect_login_form(page, analysis)
+            login_info = await self._detect_login_form(context_id, analysis)
             if login_info:
                 analysis.has_login_form = True
                 analysis.login_form_info = login_info
@@ -362,7 +397,7 @@ class AutoTestBuilder:
 
         return analysis
 
-    def _discover_elements(self, page: BrowserContext) -> list[ElementInfo]:
+    async def _discover_elements(self, context_id: str) -> list[ElementInfo]:
         """Discover all interactable elements on the page using a single batched query."""
         # PERFORMANCE: Single JavaScript call to get ALL elements at once
         # This replaces 18+ separate queries with ONE round-trip
@@ -464,7 +499,9 @@ class AutoTestBuilder:
         """
 
         try:
-            raw_elements = page.expression(script)
+            # SDK v2: use evaluate for JavaScript execution
+            result = await self._browser.evaluate(context_id=context_id, expression=script)
+            raw_elements = result.get("result") if isinstance(result, dict) else result
 
             if not raw_elements or not isinstance(raw_elements, list):
                 self._log.debug("No elements returned from batched query")
@@ -525,9 +562,9 @@ class AutoTestBuilder:
         }
         return type_mapping.get(type_str, ElementType.BUTTON)
 
-    def _query_elements(
+    async def _query_elements(
         self,
-        page: BrowserContext,
+        context_id: str,
         selector: str,
         element_type: ElementType,
     ) -> list[ElementInfo]:
@@ -579,7 +616,9 @@ class AutoTestBuilder:
         """
 
         try:
-            raw_elements = page.expression(script)
+            # SDK v2: use evaluate for JavaScript execution
+            result = await self._browser.evaluate(context_id=context_id, expression=script)
+            raw_elements = result.get("result") if isinstance(result, dict) else result
 
             # Handle case where result might be None or not a list
             if not raw_elements or not isinstance(raw_elements, list):
@@ -728,9 +767,9 @@ class AutoTestBuilder:
 
         return tag
 
-    def _discover_forms(
+    async def _discover_forms(
         self,
-        page: BrowserContext,
+        context_id: str,
         elements: list[ElementInfo],
     ) -> list[dict[str, Any]]:
         """Discover and analyze forms on the page."""
@@ -750,7 +789,9 @@ class AutoTestBuilder:
         """
 
         try:
-            raw_forms = page.expression(script)
+            # SDK v2: use evaluate for JavaScript execution
+            result = await self._browser.evaluate(context_id=context_id, expression=script)
+            raw_forms = result.get("result") if isinstance(result, dict) else result
 
             # Handle case where result might be None or not a list
             if not raw_forms or not isinstance(raw_forms, list):
@@ -776,13 +817,14 @@ class AutoTestBuilder:
 
         return forms
 
-    def _detect_login_form(
+    async def _detect_login_form(
         self,
-        page: BrowserContext,
+        context_id: str,
         analysis: PageAnalysis,
     ) -> dict[str, Any] | None:
         """Detect login form and extract field selectors."""
-        url_lower = page.get_current_url().lower()
+        page_info = await self._browser.get_page_info(context_id=context_id)
+        url_lower = (page_info.get("url", "") if isinstance(page_info, dict) else "").lower()
 
         # Check URL for login indicators
         url_has_login = any(ind in url_lower for ind in self.LOGIN_INDICATORS)

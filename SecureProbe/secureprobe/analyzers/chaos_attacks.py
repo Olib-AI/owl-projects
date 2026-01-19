@@ -15,10 +15,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-import os
 import re
-import sys
-from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
@@ -26,46 +23,14 @@ import httpx
 import structlog
 from dotenv import load_dotenv
 
-# Add python-sdk to path for owl_browser imports before loading local modules
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "python-sdk"))
-
 # Load environment variables
 load_dotenv()
 
-# Local imports after path setup and env loading  # noqa: E402
-from secureprobe.analyzers.base import BaseAnalyzer  # noqa: E402
-from secureprobe.models import AnalyzerType, Finding, Severity  # noqa: E402
-from secureprobe.utils import safe_response_text  # noqa: E402
+from secureprobe.analyzers.base import BaseAnalyzer
+from secureprobe.models import AnalyzerType, Finding, Severity
+from secureprobe.utils import browser_context, get_browser, safe_response_text
 
 logger = structlog.get_logger(__name__)
-
-
-def _get_browser_instance() -> Any:
-    """
-    Create a Browser instance with remote URL configuration if available.
-
-    Loads OWL_BROWSER_URL and OWL_BROWSER_TOKEN from environment.
-    Falls back to local browser if no remote configuration is present.
-
-    Returns:
-        Configured Browser instance
-    """
-    from owl_browser import Browser, RemoteConfig
-
-    remote_url = os.getenv("OWL_BROWSER_URL")
-    remote_token = os.getenv("OWL_BROWSER_TOKEN")
-
-    if remote_url and remote_token:
-        logger.debug(
-            "chaos_analyzer_using_remote_browser",
-            remote_url=remote_url,
-            has_token=bool(remote_token),
-        )
-        remote_config = RemoteConfig(url=remote_url, token=remote_token)
-        return Browser(remote=remote_config)
-    else:
-        logger.debug("chaos_analyzer_using_local_browser")
-        return Browser()
 
 
 class ChaosAttacksAnalyzer(BaseAnalyzer):
@@ -186,7 +151,6 @@ class ChaosAttacksAnalyzer(BaseAnalyzer):
 
         html_content = page_data.get("html", "")
         forms = page_data.get("forms", [])
-        headers = page_data.get("headers", {})
         scripts = page_data.get("scripts", [])
 
         # Execute all chaos attack patterns (original 10)
@@ -696,7 +660,7 @@ class ChaosAttacksAnalyzer(BaseAnalyzer):
         """
         Attack 5: Browser Console Secrets.
 
-        Use page.evaluate() to dump localStorage, sessionStorage, and
+        Use browser.evaluate() to dump localStorage, sessionStorage, and
         window global variables. Developers often leave secrets in these
         client-accessible locations.
 
@@ -705,87 +669,100 @@ class ChaosAttacksAnalyzer(BaseAnalyzer):
         findings: list[Finding] = []
 
         try:
-            with _get_browser_instance() as browser:
-                page = browser.new_page()
-                page.goto(url, timeout=self.config.timeout * 1000)
+            async with get_browser() as browser:
+                async with browser_context(browser) as context_id:
+                    # Navigate to target URL
+                    await browser.navigate(
+                        context_id=context_id,
+                        url=url,
+                        timeout=int(self.config.timeout * 1000),
+                    )
 
-                # Wait for page to settle
-                with contextlib.suppress(Exception):
-                    page.wait_for_network_idle(idle_time=500, timeout=5000)
+                    # Wait for page to settle
+                    with contextlib.suppress(Exception):
+                        await browser.wait_for_network_idle(
+                            context_id=context_id, idle_time=500, timeout=5000
+                        )
 
-                # Extract all client-side storage and global state
-                secrets_script = """
-                (() => {
-                    const secrets = {
-                        localStorage: {},
-                        sessionStorage: {},
-                        globalVars: {}
-                    };
+                    # Extract all client-side storage and global state
+                    secrets_script = """
+                    (() => {
+                        const secrets = {
+                            localStorage: {},
+                            sessionStorage: {},
+                            globalVars: {}
+                        };
 
-                    // Dump localStorage
-                    try {
-                        for (let i = 0; i < localStorage.length; i++) {
-                            const key = localStorage.key(i);
-                            secrets.localStorage[key] = localStorage.getItem(key);
-                        }
-                    } catch (e) {}
-
-                    // Dump sessionStorage
-                    try {
-                        for (let i = 0; i < sessionStorage.length; i++) {
-                            const key = sessionStorage.key(i);
-                            secrets.sessionStorage[key] = sessionStorage.getItem(key);
-                        }
-                    } catch (e) {}
-
-                    // Check for common global secrets
-                    const globalPatterns = [
-                        '__INITIAL_STATE__',
-                        '__PRELOADED_STATE__',
-                        '__REDUX_STATE__',
-                        '__NEXT_DATA__',
-                        '__NUXT__',
-                        'config',
-                        'CONFIG',
-                        'appConfig',
-                        'APP_CONFIG',
-                        'settings',
-                        'SETTINGS',
-                        'environment',
-                        'ENV',
-                        'apiKey',
-                        'API_KEY',
-                        'token',
-                        'TOKEN',
-                        'secret',
-                        'SECRET',
-                        'credentials',
-                        'auth',
-                        'user',
-                        '__APP_DATA__',
-                        'window.config',
-                        'window.settings',
-                    ];
-
-                    for (const pattern of globalPatterns) {
+                        // Dump localStorage
                         try {
-                            const value = eval(pattern);
-                            if (value !== undefined && value !== null) {
-                                // Truncate large objects
-                                const strVal = JSON.stringify(value);
-                                secrets.globalVars[pattern] = strVal.length > 1000
-                                    ? strVal.substring(0, 1000) + '...'
-                                    : strVal;
+                            for (let i = 0; i < localStorage.length; i++) {
+                                const key = localStorage.key(i);
+                                secrets.localStorage[key] = localStorage.getItem(key);
                             }
                         } catch (e) {}
-                    }
 
-                    return secrets;
-                })()
-                """
+                        // Dump sessionStorage
+                        try {
+                            for (let i = 0; i < sessionStorage.length; i++) {
+                                const key = sessionStorage.key(i);
+                                secrets.sessionStorage[key] = sessionStorage.getItem(key);
+                            }
+                        } catch (e) {}
 
-                result = page.evaluate(secrets_script, return_value=True)
-                page.close()
+                        // Check for common global secrets
+                        const globalPatterns = [
+                            '__INITIAL_STATE__',
+                            '__PRELOADED_STATE__',
+                            '__REDUX_STATE__',
+                            '__NEXT_DATA__',
+                            '__NUXT__',
+                            'config',
+                            'CONFIG',
+                            'appConfig',
+                            'APP_CONFIG',
+                            'settings',
+                            'SETTINGS',
+                            'environment',
+                            'ENV',
+                            'apiKey',
+                            'API_KEY',
+                            'token',
+                            'TOKEN',
+                            'secret',
+                            'SECRET',
+                            'credentials',
+                            'auth',
+                            'user',
+                            '__APP_DATA__',
+                            'window.config',
+                            'window.settings',
+                        ];
+
+                        for (const pattern of globalPatterns) {
+                            try {
+                                const value = eval(pattern);
+                                if (value !== undefined && value !== null) {
+                                    // Truncate large objects
+                                    const strVal = JSON.stringify(value);
+                                    secrets.globalVars[pattern] = strVal.length > 1000
+                                        ? strVal.substring(0, 1000) + '...'
+                                        : strVal;
+                                }
+                            } catch (e) {}
+                        }
+
+                        return secrets;
+                    })()
+                    """
+
+                    eval_result = await browser.evaluate(
+                        context_id=context_id,
+                        script=secrets_script,
+                        return_value=True,
+                    )
+
+                    # Extract result from SDK v2 response format
+                    result = eval_result.get("result") if isinstance(eval_result, dict) else eval_result
 
                 if not isinstance(result, dict):
                     return findings
@@ -1682,70 +1659,77 @@ class ChaosAttacksAnalyzer(BaseAnalyzer):
         findings: list[Finding] = []
 
         try:
-            with _get_browser_instance() as browser:
-                page = browser.new_page()
-                page.goto(url, timeout=self.config.timeout * 1000)
-
-                # Wait for page to settle
-                with contextlib.suppress(Exception):
-                    page.wait_for_network_idle(idle_time=500, timeout=5000)
-
-                # Get initial page state
-                initial_html = page.get_html()
-
-                # Konami code sequence: up, up, down, down, left, right, left, right, b, a
-                # Note: Only using arrow keys as letter keys require type_text() method
-                konami_keys = [
-                    "ArrowUp", "ArrowUp", "ArrowDown", "ArrowDown",
-                    "ArrowLeft", "ArrowRight", "ArrowLeft", "ArrowRight",
-                ]
-
-                # Execute konami code
-                for key in konami_keys:
-                    page.press_key(key)
-                    await asyncio.sleep(0.05)  # Small delay between keys
-
-                # Wait and check for changes
-                await asyncio.sleep(0.5)
-                post_konami_html = page.get_html()
-
-                # Check for debug/admin panels appearing
-                debug_indicators = [
-                    "debug-panel", "debug-mode", "developer-tools",
-                    "admin-console", "hidden-menu", "easter-egg",
-                    "cheat-mode", "god-mode", "super-user",
-                ]
-
-                new_elements: list[str] = []
-                for indicator in debug_indicators:
-                    if indicator in post_konami_html.lower() and indicator not in initial_html.lower():
-                        new_elements.append(indicator)
-
-                # Check for significant content changes
-                if len(post_konami_html) > len(initial_html) * 1.2 or new_elements:
-                    findings.append(
-                        self._create_finding(
-                            severity=Severity.MEDIUM,
-                            title="Hidden Debug Mode Triggered by Key Sequence",
-                            description=(
-                                "Application responds to Konami code or similar key sequences, "
-                                f"revealing hidden functionality. New elements: {', '.join(new_elements) or 'content change detected'}. "
-                                "Debug modes in production can expose sensitive functionality."
-                            ),
-                            cwe_id="CWE-489",
-                            cwe_name="Active Debug Code",
-                            url=url,
-                            evidence=f"Key sequence triggered response. Content growth: {len(post_konami_html) - len(initial_html)} bytes",
-                            remediation=(
-                                "Remove all debug modes, easter eggs, and hidden features from production. "
-                                "Use feature flags that are completely disabled in production builds."
-                            ),
-                            cvss_score=5.3,
-                            metadata={"new_elements": new_elements},
-                        )
+            async with get_browser() as browser:
+                async with browser_context(browser) as context_id:
+                    # Navigate to target URL
+                    await browser.navigate(
+                        context_id=context_id,
+                        url=url,
+                        timeout=int(self.config.timeout * 1000),
                     )
 
-                page.close()
+                    # Wait for page to settle
+                    with contextlib.suppress(Exception):
+                        await browser.wait_for_network_idle(
+                            context_id=context_id, idle_time=500, timeout=5000
+                        )
+
+                    # Get initial page state
+                    html_result = await browser.get_html(context_id=context_id)
+                    initial_html = html_result.get("html", "") if isinstance(html_result, dict) else ""
+
+                    # Konami code sequence: up, up, down, down, left, right, left, right, b, a
+                    # Note: Only using arrow keys as letter keys require type_text() method
+                    konami_keys = [
+                        "ArrowUp", "ArrowUp", "ArrowDown", "ArrowDown",
+                        "ArrowLeft", "ArrowRight", "ArrowLeft", "ArrowRight",
+                    ]
+
+                    # Execute konami code
+                    for key in konami_keys:
+                        await browser.press_key(context_id=context_id, key=key)
+                        await asyncio.sleep(0.05)  # Small delay between keys
+
+                    # Wait and check for changes
+                    await asyncio.sleep(0.5)
+                    html_result = await browser.get_html(context_id=context_id)
+                    post_konami_html = html_result.get("html", "") if isinstance(html_result, dict) else ""
+
+                    # Check for debug/admin panels appearing
+                    debug_indicators = [
+                        "debug-panel", "debug-mode", "developer-tools",
+                        "admin-console", "hidden-menu", "easter-egg",
+                        "cheat-mode", "god-mode", "super-user",
+                    ]
+
+                    new_elements: list[str] = []
+                    for indicator in debug_indicators:
+                        if indicator in post_konami_html.lower() and indicator not in initial_html.lower():
+                            new_elements.append(indicator)
+
+                    # Check for significant content changes
+                    if len(post_konami_html) > len(initial_html) * 1.2 or new_elements:
+                        findings.append(
+                            self._create_finding(
+                                severity=Severity.MEDIUM,
+                                title="Hidden Debug Mode Triggered by Key Sequence",
+                                description=(
+                                    "Application responds to Konami code or similar key sequences, "
+                                    f"revealing hidden functionality. New elements: {', '.join(new_elements) or 'content change detected'}. "
+                                    "Debug modes in production can expose sensitive functionality."
+                                ),
+                                cwe_id="CWE-489",
+                                cwe_name="Active Debug Code",
+                                url=url,
+                                evidence=f"Key sequence triggered response. Content growth: {len(post_konami_html) - len(initial_html)} bytes",
+                                remediation=(
+                                    "Remove all debug modes, easter eggs, and hidden features from production. "
+                                    "Use feature flags that are completely disabled in production builds."
+                                ),
+                                cvss_score=5.3,
+                                metadata={"new_elements": new_elements},
+                            )
+                        )
 
         except Exception as e:
             logger.debug("rapid_key_sequence_error", error=str(e))
@@ -1814,7 +1798,7 @@ class ChaosAttacksAnalyzer(BaseAnalyzer):
                     findings.append(
                         self._create_finding(
                             severity=Severity.HIGH,
-                            title=f"No Rate Limiting on Form Submission",
+                            title="No Rate Limiting on Form Submission",
                             description=(
                                 f"Form '{form_id}' accepted {len(successful)}/50 rapid submissions. "
                                 "No rate limiting detected. This enables brute force attacks, "
@@ -2055,7 +2039,7 @@ class ChaosAttacksAnalyzer(BaseAnalyzer):
                             cwe_id="CWE-307",
                             cwe_name="Improper Restriction of Excessive Authentication Attempts",
                             url=form_action,
-                            evidence=f"100 failed attempts, no lockout detected",
+                            evidence="100 failed attempts, no lockout detected",
                             remediation=(
                                 "Implement account lockout after 5-10 failed attempts. "
                                 "Use progressive delays (exponential backoff). "
@@ -2768,72 +2752,85 @@ class ChaosAttacksAnalyzer(BaseAnalyzer):
         findings: list[Finding] = []
 
         try:
-            with _get_browser_instance() as browser:
-                page = browser.new_page()
-                page.goto(url, timeout=self.config.timeout * 1000)
+            async with get_browser() as browser:
+                async with browser_context(browser) as context_id:
+                    # Navigate to target URL
+                    await browser.navigate(
+                        context_id=context_id,
+                        url=url,
+                        timeout=int(self.config.timeout * 1000),
+                    )
 
-                # Wait for page to settle
-                with contextlib.suppress(Exception):
-                    page.wait_for_network_idle(idle_time=500, timeout=5000)
-
-                # Check for service worker registrations and scope
-                sw_check_script = """
-                (() => {
-                    const results = {
-                        hasServiceWorker: false,
-                        registrations: [],
-                        scope: null,
-                        canRegister: false,
-                        swScripts: []
-                    };
-
-                    // Check for existing SW
-                    if ('serviceWorker' in navigator) {
-                        results.hasServiceWorker = true;
-
-                        // Look for SW registration scripts
-                        const scripts = document.querySelectorAll('script');
-                        scripts.forEach(s => {
-                            if (s.textContent && s.textContent.includes('serviceWorker.register')) {
-                                results.swScripts.push(s.textContent.substring(0, 200));
-                            }
-                        });
-                    }
-
-                    // Check scope
-                    results.scope = window.location.origin;
-
-                    return results;
-                })()
-                """
-
-                result = page.evaluate(sw_check_script, return_value=True)
-                page.close()
-
-                if isinstance(result, dict):
-                    if result.get("swScripts"):
-                        findings.append(
-                            self._create_finding(
-                                severity=Severity.INFO,
-                                title="ServiceWorker Registration Detected",
-                                description=(
-                                    f"Page registers a ServiceWorker. Scope: {result.get('scope')}. "
-                                    "ServiceWorkers provide persistence and can intercept requests. "
-                                    "If compromised, they enable persistent XSS and MITM."
-                                ),
-                                cwe_id="CWE-284",
-                                cwe_name="Improper Access Control",
-                                url=url,
-                                evidence=f"SW scripts found: {len(result.get('swScripts', []))}",
-                                remediation=(
-                                    "Audit ServiceWorker code for security issues. "
-                                    "Implement CSP to restrict SW sources. "
-                                    "Use subresource integrity for SW scripts."
-                                ),
-                                cvss_score=3.1,
-                                metadata={"scope": result.get("scope"), "sw_count": len(result.get("swScripts", []))},
-                            )
+                    # Wait for page to settle
+                    with contextlib.suppress(Exception):
+                        await browser.wait_for_network_idle(
+                            context_id=context_id, idle_time=500, timeout=5000
                         )
+
+                    # Check for service worker registrations and scope
+                    sw_check_script = """
+                    (() => {
+                        const results = {
+                            hasServiceWorker: false,
+                            registrations: [],
+                            scope: null,
+                            canRegister: false,
+                            swScripts: []
+                        };
+
+                        // Check for existing SW
+                        if ('serviceWorker' in navigator) {
+                            results.hasServiceWorker = true;
+
+                            // Look for SW registration scripts
+                            const scripts = document.querySelectorAll('script');
+                            scripts.forEach(s => {
+                                if (s.textContent && s.textContent.includes('serviceWorker.register')) {
+                                    results.swScripts.push(s.textContent.substring(0, 200));
+                                }
+                            });
+                        }
+
+                        // Check scope
+                        results.scope = window.location.origin;
+
+                        return results;
+                    })()
+                    """
+
+                    eval_result = await browser.evaluate(
+                        context_id=context_id,
+                        script=sw_check_script,
+                        return_value=True,
+                    )
+
+                    # Extract result from SDK v2 response format
+                    result = eval_result.get("result") if isinstance(eval_result, dict) else eval_result
+
+                    if isinstance(result, dict):
+                        if result.get("swScripts"):
+                            findings.append(
+                                self._create_finding(
+                                    severity=Severity.INFO,
+                                    title="ServiceWorker Registration Detected",
+                                    description=(
+                                        f"Page registers a ServiceWorker. Scope: {result.get('scope')}. "
+                                        "ServiceWorkers provide persistence and can intercept requests. "
+                                        "If compromised, they enable persistent XSS and MITM."
+                                    ),
+                                    cwe_id="CWE-284",
+                                    cwe_name="Improper Access Control",
+                                    url=url,
+                                    evidence=f"SW scripts found: {len(result.get('swScripts', []))}",
+                                    remediation=(
+                                        "Audit ServiceWorker code for security issues. "
+                                        "Implement CSP to restrict SW sources. "
+                                        "Use subresource integrity for SW scripts."
+                                    ),
+                                    cvss_score=3.1,
+                                    metadata={"scope": result.get("scope"), "sw_count": len(result.get("swScripts", []))},
+                                )
+                            )
 
         except Exception as e:
             logger.debug("serviceworker_check_error", error=str(e))

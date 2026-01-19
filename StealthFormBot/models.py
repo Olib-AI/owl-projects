@@ -164,9 +164,14 @@ class ApifyProxyConfig:
         groups: Proxy groups to use (e.g., ["RESIDENTIAL", "SHADER"])
                 Empty list uses default datacenter proxies.
         country_code: Two-letter country code for geo-targeting (e.g., "US", "DE")
+        session_id: Session identifier for proxy session persistence. Using the same
+                    session ID guarantees the same proxy IP address across requests.
+                    Must be max 50 characters, alphanumeric with underscore, dot, tilde.
+                    If None, a unique session ID will be auto-generated per Actor run.
     """
     groups: list[str] = field(default_factory=list)
     country_code: str | None = None
+    session_id: str | None = None
 
 
 @dataclass

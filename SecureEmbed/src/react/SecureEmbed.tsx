@@ -5,7 +5,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import type { ReactElement } from 'react';
-import { SecureEmbed as VanillaSecureEmbed } from '../vanilla/secure-embed.js';
+import { SecureEmbed as SecureEmbedCore, destroy as destroyCore, healthCheck as healthCheckCore } from '../secure-core/secure-loader.js';
 import type { EmbedConfig, ProviderType } from '../types.js';
 
 /** Props for SecureEmbed component */
@@ -98,13 +98,13 @@ export function SecureEmbed({
         onLoad: () => {
           if (mounted) handleLoad();
         },
-        onError: (err) => {
+        onError: (err: Error) => {
           if (mounted) handleError(err);
         },
       };
 
       try {
-        await VanillaSecureEmbed.init(config);
+        await SecureEmbedCore.init(config);
       } catch (err: unknown) {
         if (mounted) {
           handleError(err instanceof Error ? err : new Error('Unknown error'));
@@ -116,7 +116,7 @@ export function SecureEmbed({
 
     return () => {
       mounted = false;
-      void VanillaSecureEmbed.destroy(provider);
+      void destroyCore(provider);
     };
   }, [provider, configUrl, effectiveContainerId, handleLoad, handleError]);
 
@@ -193,14 +193,14 @@ export function useSecureEmbed(): {
     setError(null);
 
     try {
-      await VanillaSecureEmbed.init({
+      await SecureEmbedCore.init({
         ...config,
         onLoad: () => {
           setIsLoaded(true);
           setIsLoading(false);
           config.onLoad?.();
         },
-        onError: (err) => {
+        onError: (err: Error) => {
           setError(err);
           setIsLoading(false);
           config.onError?.(err);
@@ -215,12 +215,12 @@ export function useSecureEmbed(): {
   }, []);
 
   const destroy = useCallback(async (provider: ProviderType): Promise<void> => {
-    await VanillaSecureEmbed.destroy(provider);
+    await destroyCore(provider);
     setIsLoaded(false);
   }, []);
 
   const healthCheck = useCallback(async (): Promise<boolean> => {
-    return VanillaSecureEmbed.healthCheck();
+    return healthCheckCore();
   }, []);
 
   return {

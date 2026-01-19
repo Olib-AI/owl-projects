@@ -6,6 +6,12 @@ Provides a pool of browser contexts with:
 - Usage tracking and limits
 - Health checks and automatic recovery
 - Async-first design with proper cleanup
+
+SDK v2 Notes:
+- Uses OwlBrowser instead of Browser
+- Context is identified by context_id string (from create_context)
+- All operations are async
+- Context lifecycle: create_context -> use -> close_context
 """
 
 from __future__ import annotations
@@ -21,8 +27,7 @@ from typing import TYPE_CHECKING, Any, AsyncIterator
 import structlog
 
 if TYPE_CHECKING:
-    from owl_browser import Browser
-    from owl_browser import BrowserContext as OwlBrowserContext
+    from owl_browser import OwlBrowser
 
     from autoqa.concurrency.config import ConcurrencyConfig
     from autoqa.concurrency.resource_monitor import ResourceMonitor
@@ -59,18 +64,22 @@ class ContextState(StrEnum):
 
 
 @dataclass
-class BrowserContext:
+class PooledContext:
     """
     Wrapper for a browser context with metadata.
 
     Tracks lifecycle information for pool management.
+
+    SDK v2 Notes:
+        - context_id is the string ID from browser.create_context()
+        - No longer holds a page object, just the ID
     """
 
     id: str
-    """Unique identifier for this context."""
+    """Unique identifier for this context in the pool."""
 
-    context: OwlBrowserContext
-    """The underlying owl-browser context."""
+    context_id: str
+    """The browser context_id from SDK v2 create_context."""
 
     state: ContextState = ContextState.AVAILABLE
     """Current state of the context."""
@@ -114,6 +123,10 @@ class BrowserContext:
         self.last_used_at = time.time()
 
 
+# Alias for backwards compatibility
+BrowserContext = PooledContext
+
+
 class BrowserPool:
     """
     Pool of browser contexts for parallel test execution.
@@ -125,16 +138,21 @@ class BrowserPool:
     - Resource-aware scaling
     - Async-first with proper cancellation handling
 
+    SDK v2 Notes:
+        - Uses OwlBrowser.create_context() to get context_id
+        - acquire() yields context_id string for use with browser methods
+        - All browser operations done via browser.method(context_id=...)
+
     Usage:
         async with BrowserPool(browser, config) as pool:
-            async with pool.acquire("my_test") as context:
-                # Use context for test execution
-                context.goto("https://example.com")
+            async with pool.acquire("my_test") as context_id:
+                # Use context_id with browser methods
+                await browser.navigate(context_id=context_id, url="https://example.com")
     """
 
     def __init__(
         self,
-        browser: Browser,
+        browser: OwlBrowser,
         config: ConcurrencyConfig,
         resource_monitor: ResourceMonitor | None = None,
     ) -> None:
@@ -142,7 +160,7 @@ class BrowserPool:
         Initialize browser pool.
 
         Args:
-            browser: The owl-browser instance
+            browser: The owl-browser SDK v2 instance
             config: Concurrency configuration
             resource_monitor: Optional resource monitor for adaptive scaling
         """
@@ -150,7 +168,7 @@ class BrowserPool:
         self._config = config
         self._resource_monitor = resource_monitor
 
-        self._contexts: dict[str, BrowserContext] = {}
+        self._contexts: dict[str, PooledContext] = {}
         self._available: asyncio.Queue[str] = asyncio.Queue()
         self._lock = asyncio.Lock()
         self._cleanup_task: asyncio.Task[None] | None = None
@@ -268,20 +286,24 @@ class BrowserPool:
         self,
         test_name: str | None = None,
         timeout: float | None = None,
-    ) -> AsyncIterator[OwlBrowserContext]:
+    ) -> AsyncIterator[str]:
         """
         Acquire a browser context from the pool.
 
+        SDK v2 Notes:
+            - Yields context_id string for use with browser methods
+            - Caller uses: await browser.navigate(context_id=context_id, url=...)
+
         Usage:
-            async with pool.acquire("my_test") as context:
-                context.goto("https://example.com")
+            async with pool.acquire("my_test") as context_id:
+                await browser.navigate(context_id=context_id, url="https://example.com")
 
         Args:
             test_name: Optional name of the test for tracking
             timeout: Acquisition timeout (uses config default if not specified)
 
         Yields:
-            The underlying owl-browser context
+            The context_id string for browser operations
 
         Raises:
             PoolExhaustedError: If no context available within timeout
@@ -291,18 +313,18 @@ class BrowserPool:
             raise BrowserPoolError("Pool is closed")
 
         effective_timeout = timeout or self._config.acquire_timeout_seconds
-        context = await self._acquire_context(test_name, effective_timeout)
+        pooled_context = await self._acquire_context(test_name, effective_timeout)
 
         try:
-            yield context.context
+            yield pooled_context.context_id
         finally:
-            await self._release_context(context)
+            await self._release_context(pooled_context)
 
     async def _acquire_context(
         self,
         test_name: str | None,
         timeout: float,
-    ) -> BrowserContext:
+    ) -> PooledContext:
         """Acquire a context from the pool or create new one."""
         self._stats["total_acquisitions"] += 1
         start = time.monotonic()
@@ -310,34 +332,35 @@ class BrowserPool:
         while (time.monotonic() - start) < timeout:
             # Try to get available context
             try:
-                context_id = await asyncio.wait_for(
+                pool_id = await asyncio.wait_for(
                     self._available.get(),
                     timeout=min(1.0, timeout - (time.monotonic() - start)),
                 )
 
                 async with self._lock:
-                    context = self._contexts.get(context_id)
-                    if context is None:
+                    pooled_context = self._contexts.get(pool_id)
+                    if pooled_context is None:
                         continue
 
                     # Check if context needs recycling
-                    if self._should_recycle(context):
-                        await self._recycle_context(context)
+                    if self._should_recycle(pooled_context):
+                        await self._recycle_context(pooled_context)
                         continue
 
                     # Check context health
-                    if not await self._check_context_health(context):
-                        await self._recycle_context(context)
+                    if not await self._check_context_health(pooled_context):
+                        await self._recycle_context(pooled_context)
                         continue
 
-                    context.mark_used(test_name)
+                    pooled_context.mark_used(test_name)
                     self._log.debug(
                         "Context acquired",
-                        context_id=context.id,
+                        pool_id=pooled_context.id,
+                        context_id=pooled_context.context_id,
                         test=test_name,
-                        use_count=context.use_count,
+                        use_count=pooled_context.use_count,
                     )
-                    return context
+                    return pooled_context
 
             except asyncio.TimeoutError:
                 # No available context, try to create new one
@@ -358,15 +381,16 @@ class BrowserPool:
 
                     # Create context without adding to available queue
                     # since we're immediately acquiring it
-                    context = await self._create_context(make_available=False)
-                    if context is not None:
-                        context.mark_used(test_name)
+                    pooled_context = await self._create_context(make_available=False)
+                    if pooled_context is not None:
+                        pooled_context.mark_used(test_name)
                         self._log.debug(
                             "New context created and acquired",
-                            context_id=context.id,
+                            pool_id=pooled_context.id,
+                            context_id=pooled_context.context_id,
                             test=test_name,
                         )
-                        return context
+                        return pooled_context
 
             # Brief wait before retry
             await asyncio.sleep(0.1)
@@ -376,125 +400,144 @@ class BrowserPool:
             f"(pool size: {self.size}, available: {self.available_count})"
         )
 
-    async def _release_context(self, context: BrowserContext) -> None:
+    async def _release_context(self, pooled_context: PooledContext) -> None:
         """Release a context back to the pool."""
         self._stats["total_releases"] += 1
 
         async with self._lock:
-            if context.id not in self._contexts:
+            if pooled_context.id not in self._contexts:
                 self._log.warning(
                     "Released context not in pool",
-                    context_id=context.id,
+                    pool_id=pooled_context.id,
                 )
                 return
 
             # Check if context should be recycled
-            if self._should_recycle(context):
-                await self._recycle_context(context)
+            if self._should_recycle(pooled_context):
+                await self._recycle_context(pooled_context)
                 return
 
             # Mark as available
-            context.mark_released()
-            await self._available.put(context.id)
+            pooled_context.mark_released()
+            await self._available.put(pooled_context.id)
 
             self._log.debug(
                 "Context released",
-                context_id=context.id,
-                use_count=context.use_count,
+                pool_id=pooled_context.id,
+                context_id=pooled_context.context_id,
+                use_count=pooled_context.use_count,
             )
 
-    async def _create_context(self, make_available: bool = True) -> BrowserContext | None:
+    async def _create_context(self, make_available: bool = True) -> PooledContext | None:
         """
         Create a new browser context.
+
+        SDK v2 Notes:
+            - Uses browser.create_context() to get context_id
+            - Stores context_id for later browser operations
 
         Args:
             make_available: If True, add to available queue. If False, caller
                            is responsible for managing the context state.
         """
         try:
-            owl_context = self._browser.new_page()
-            context_id = str(uuid.uuid4())[:8]
+            # SDK v2: create_context returns dict with context_id
+            result = await self._browser.create_context()
+            browser_context_id = result["context_id"]
+            pool_id = str(uuid.uuid4())[:8]
 
-            context = BrowserContext(
-                id=context_id,
-                context=owl_context,
+            pooled_context = PooledContext(
+                id=pool_id,
+                context_id=browser_context_id,
             )
 
-            self._contexts[context_id] = context
+            self._contexts[pool_id] = pooled_context
             if make_available:
-                await self._available.put(context_id)
+                await self._available.put(pool_id)
             self._stats["total_created"] += 1
 
-            self._log.debug("Created browser context", context_id=context_id)
-            return context
+            self._log.debug(
+                "Created browser context",
+                pool_id=pool_id,
+                context_id=browser_context_id,
+            )
+            return pooled_context
 
         except Exception as e:
             self._stats["total_failed"] += 1
             self._log.error("Failed to create browser context", error=str(e))
             return None
 
-    async def _recycle_context(self, context: BrowserContext) -> None:
+    async def _recycle_context(self, pooled_context: PooledContext) -> None:
         """Recycle a context by closing and replacing it."""
-        context.state = ContextState.RECYCLING
+        pooled_context.state = ContextState.RECYCLING
         self._stats["total_recycled"] += 1
 
         self._log.debug(
             "Recycling context",
-            context_id=context.id,
-            age=context.age_seconds,
-            uses=context.use_count,
+            pool_id=pooled_context.id,
+            context_id=pooled_context.context_id,
+            age=pooled_context.age_seconds,
+            uses=pooled_context.use_count,
         )
 
         # Close old context
-        await self._close_context(context)
+        await self._close_context(pooled_context)
 
         # Remove from pool
-        self._contexts.pop(context.id, None)
+        self._contexts.pop(pooled_context.id, None)
 
         # Create replacement if pool below minimum
         if self.size < self._config.min_browser_contexts:
             await self._create_context()
 
-    async def _close_context(self, context: BrowserContext) -> None:
+    async def _close_context(self, pooled_context: PooledContext) -> None:
         """Close a browser context safely."""
         try:
-            context.context.close()
+            # SDK v2: use close_context with context_id
+            await self._browser.close_context(context_id=pooled_context.context_id)
         except Exception as e:
-            self._log.debug("Error closing context", context_id=context.id, error=str(e))
+            self._log.debug(
+                "Error closing context",
+                pool_id=pooled_context.id,
+                context_id=pooled_context.context_id,
+                error=str(e),
+            )
 
-    def _should_recycle(self, context: BrowserContext) -> bool:
+    def _should_recycle(self, pooled_context: PooledContext) -> bool:
         """Check if a context should be recycled."""
         # Check use count
-        if context.use_count >= self._config.context_max_uses:
+        if pooled_context.use_count >= self._config.context_max_uses:
             return True
 
         # Check age
-        if context.age_seconds >= self._config.context_max_age_seconds:
+        if pooled_context.age_seconds >= self._config.context_max_age_seconds:
             return True
 
         # Check idle time (only for available contexts)
         if (
-            context.state == ContextState.AVAILABLE
-            and context.idle_seconds >= self._config.context_idle_timeout_seconds
+            pooled_context.state == ContextState.AVAILABLE
+            and pooled_context.idle_seconds >= self._config.context_idle_timeout_seconds
             and self.size > self._config.min_browser_contexts
         ):
             return True
 
         return False
 
-    async def _check_context_health(self, context: BrowserContext) -> bool:
+    async def _check_context_health(self, pooled_context: PooledContext) -> bool:
         """Check if a context is healthy and usable."""
         try:
-            # Try a simple operation to verify context is alive
-            context.context.get_current_url()
+            # SDK v2: Try get_page_info to verify context is alive
+            await self._browser.get_page_info(context_id=pooled_context.context_id)
             return True
         except Exception as e:
             self._log.warning(
                 "Context health check failed",
-                context_id=context.id,
+                pool_id=pooled_context.id,
+                context_id=pooled_context.context_id,
                 error=str(e),
             )
-            context.state = ContextState.FAILED
+            pooled_context.state = ContextState.FAILED
             return False
 
     async def _cleanup_loop(self) -> None:

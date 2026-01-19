@@ -1,6 +1,8 @@
 # @olib-ai/secure-embed
 
-Securely embed third-party scripts (chat widgets, analytics, forms) without hardcoding API keys in your HTML/JavaScript. Uses Service Worker encryption for runtime credential injection.
+[![Olib AI](https://img.shields.io/badge/Olib%20AI-www.olib.ai-blue)](https://www.olib.ai)
+
+Securely embed third-party scripts (chat widgets, analytics, forms) without hardcoding API keys in your HTML/JavaScript. Uses Service Worker + WebAssembly encryption for runtime credential injection with maximum security.
 
 ## The Problem
 
@@ -17,12 +19,13 @@ Anyone can view-source your page and steal your credentials.
 
 ## The Solution
 
-SecureEmbed encrypts your credentials and uses a Service Worker to decrypt them at runtime:
+SecureEmbed v2.0 uses **WebAssembly** to protect your security logic from reverse engineering:
 
 1. **Credentials are encrypted** at build time with domain-bound keys
-2. **Service Worker intercepts** requests to embed providers
-3. **Decryption happens in memory** - credentials never appear in source code
-4. **Domain verification** ensures credentials only work on your site
+2. **Service Worker + Wasm** intercepts requests to embed providers
+3. **Security logic is compiled to binary** - algorithms can't be read from source
+4. **Decryption happens in memory** - credentials never appear in source code
+5. **Domain verification** ensures credentials only work on your site
 
 ## Installation
 
@@ -51,9 +54,17 @@ npm install @olib-ai/secure-embed
 npx @olib-ai/secure-embed encrypt --config embed.json --output public/.secure-embed
 ```
 
-### 3. Copy the Service Worker
+### 3. Copy the Service Worker and Wasm module
 
-Copy `node_modules/@olib-ai/secure-embed/dist/service-worker.js` to your public directory as `secure-embed-sw.js`.
+Copy these files to your public directory root:
+
+```bash
+# Service Worker (Wasm-protected)
+cp node_modules/@olib-ai/secure-embed/dist/secure-sw.min.js public/secure-embed-sw.js
+
+# WebAssembly crypto core
+cp node_modules/@olib-ai/secure-embed/wasm/build/crypto-core.wasm public/secure-embed-core.wasm
+```
 
 ### 4. Use in your app
 
@@ -79,7 +90,7 @@ function App() {
 **Vanilla JavaScript:**
 
 ```js
-import { SecureEmbed } from '@olib-ai/secure-embed/vanilla';
+import { SecureEmbed } from '@olib-ai/secure-embed';
 
 SecureEmbed.init({
   provider: 'intercom',
@@ -152,7 +163,7 @@ import { useSecureEmbed } from '@olib-ai/secure-embed/react';
 
 function MyComponent() {
   const { init, destroy, isLoaded, isLoading, error, healthCheck } = useSecureEmbed();
-  
+
   useEffect(() => {
     init({
       provider: 'intercom',
@@ -160,7 +171,7 @@ function MyComponent() {
     });
     return () => destroy('intercom');
   }, [init, destroy]);
-  
+
   if (error) return <div>Error: {error.message}</div>;
   if (isLoading) return <div>Loading...</div>;
   return null;
@@ -168,6 +179,17 @@ function MyComponent() {
 ```
 
 ## Security Features
+
+### WebAssembly Protection
+
+All security-critical operations are compiled to WebAssembly binary code:
+- Cryptographic algorithms
+- Domain validation logic
+- Cache key generation
+- Protocol message encoding
+- Provider configurations
+
+This makes reverse engineering extremely difficult compared to JavaScript.
 
 ### Domain-Bound Encryption
 
@@ -189,28 +211,39 @@ Optional credential expiration prevents stolen configs from working indefinitely
 
 SHA-384 hashes verify config files haven't been tampered with.
 
-### No Memory Leaks
+### Memory-Safe Design
 
-The Service Worker uses streaming where possible and properly cleans up decrypted credentials.
+- Bounded cache (64 slots max)
+- Automatic TTL-based eviction (1 hour)
+- Explicit cleanup functions
+- No memory leaks
 
-## How It Works
+## Architecture
 
 ```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│   Build Time    │     │     Runtime      │     │    Provider     │
-├─────────────────┤     ├──────────────────┤     ├─────────────────┤
-│                 │     │                  │     │                 │
-│  embed.json     │     │  Browser loads   │     │  Intercom API   │
-│       │         │     │  encrypted .enc  │     │                 │
-│       ▼         │     │       │          │     │                 │
-│  CLI encrypts   │     │       ▼          │     │                 │
-│  with domain    │────▶│  Service Worker  │────▶│  Receives       │
-│  key + salt     │     │  decrypts +      │     │  authenticated  │
-│       │         │     │  injects creds   │     │  request        │
-│       ▼         │     │                  │     │                 │
-│  .enc file      │     │                  │     │                 │
-│                 │     │                  │     │                 │
-└─────────────────┘     └──────────────────┘     └─────────────────┘
+┌─────────────────┐     ┌──────────────────────────────┐     ┌─────────────────┐
+│   Build Time    │     │          Runtime             │     │    Provider     │
+├─────────────────┤     ├──────────────────────────────┤     ├─────────────────┤
+│                 │     │                              │     │                 │
+│  embed.json     │     │  Browser loads               │     │  Intercom API   │
+│       │         │     │  encrypted .enc              │     │                 │
+│       ▼         │     │       │                      │     │                 │
+│  CLI encrypts   │     │       ▼                      │     │                 │
+│  with domain    │────▶│  ┌────────────────────┐      │     │                 │
+│  key + salt     │     │  │  Service Worker    │      │     │                 │
+│       │         │     │  │  (9KB JS loader)   │      │────▶│  Receives       │
+│       ▼         │     │  └─────────┬──────────┘      │     │  authenticated  │
+│  .enc file      │     │            │                 │     │  request        │
+│                 │     │            ▼                 │     │                 │
+│                 │     │  ┌────────────────────┐      │     │                 │
+│                 │     │  │  Wasm Crypto Core  │      │     │                 │
+│                 │     │  │  (21KB binary)     │      │     │                 │
+│                 │     │  │  - Decryption      │      │     │                 │
+│                 │     │  │  - Domain check    │      │     │                 │
+│                 │     │  │  - Cred injection  │      │     │                 │
+│                 │     │  └────────────────────┘      │     │                 │
+│                 │     │                              │     │                 │
+└─────────────────┘     └──────────────────────────────┘     └─────────────────┘
 ```
 
 ## Browser Support
@@ -220,7 +253,7 @@ The Service Worker uses streaming where possible and properly cleans up decrypte
 - Safari 11.1+
 - Edge 79+
 
-Requires Service Worker support.
+Requires Service Worker and WebAssembly support.
 
 ## TypeScript
 
@@ -237,28 +270,82 @@ import type {
 
 ## API Reference
 
-### `encryptCredentials(payload, domains, provider, expiresAt?)`
+### Core API
 
-Encrypt credentials for deployment.
+```ts
+import { SecureEmbed, init, destroy, healthCheck } from '@olib-ai/secure-embed';
 
-### `decryptCredentials(config, currentDomain)`
+// Initialize an embed
+await init({ provider: 'intercom', configUrl: '/config.enc' });
 
-Decrypt credentials (used internally by Service Worker).
+// Destroy an embed
+await destroy('intercom');
 
-### `verifyIntegrity(config)`
+// Check if service worker is healthy
+const isHealthy = await healthCheck();
+```
 
-Verify the SHA-384 integrity hash of an encrypted config.
+### Crypto Utilities
 
-### `getProviderConfig(provider)`
+```ts
+import { encryptCredentials, decryptCredentials, verifyIntegrity } from '@olib-ai/secure-embed';
 
-Get the configuration for a specific provider.
+// Encrypt credentials for deployment
+const encrypted = await encryptCredentials(payload, domains, provider, expiresAt);
+
+// Decrypt credentials (used internally by Service Worker)
+const decrypted = await decryptCredentials(config, currentDomain);
+
+// Verify the SHA-384 integrity hash
+const isValid = await verifyIntegrity(config);
+```
+
+### Wasm Core (Advanced)
+
+```ts
+import { loadWasmCore, getWasmCore, releaseWasmCore } from '@olib-ai/secure-embed';
+
+// Load the Wasm module manually
+const core = await loadWasmCore();
+
+// Get the loaded instance
+const instance = getWasmCore();
+
+// Release resources
+releaseWasmCore();
+```
+
+## File Sizes
+
+| File | Size | Purpose |
+|------|------|---------|
+| `secure-sw.min.js` | ~9 KB | Service Worker loader |
+| `crypto-core.wasm` | ~21 KB | Security logic (binary) |
+| **Total** | **~30 KB** | Complete security layer |
 
 ## Limitations
 
 - Service Workers require HTTPS (except localhost)
+- WebAssembly must be supported by the browser
 - Initial page load fetches encrypted config (small overhead)
 - Some providers may detect Service Worker interception
 
+## Development
+
+```bash
+# Build everything
+npm run build
+
+# Build Wasm only
+npm run build:wasm
+
+# Run demo server
+npm run demo
+
+# Type check
+npm run typecheck
+```
+
 ## License
 
-MIT - Olib AI
+MIT - [Olib AI](https://www.olib.ai)

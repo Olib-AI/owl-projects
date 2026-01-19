@@ -33,7 +33,9 @@ classifiers = [
     "Typing :: Typed"
 ]
 dependencies = [
-    "owl-browser>=1.0.0",
+    # SDK v2 - async-first with context_id pattern
+    # Install from local path: pip install -e /path/to/olib-browser/python-sdk-v2
+    "owl-browser>=2.0.0",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
     "pydantic>=2.10.0",

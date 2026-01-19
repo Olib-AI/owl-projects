@@ -10,14 +10,20 @@ __version__ = "1.0.0"
 __author__ = "Olib AI"
 
 from secureprobe.models import (
-    Finding,
-    ScanResult,
-    ScanConfig,
-    Severity,
     AnalyzerType,
+    Finding,
+    ScanConfig,
+    ScanResult,
+    Severity,
 )
 from secureprobe.orchestrator import ScanOrchestrator
 from secureprobe.rate_limiter import TokenBucketRateLimiter
+from secureprobe.utils import (
+    BrowserConfigError,
+    browser_context,
+    get_browser,
+    get_browser_config,
+)
 
 __all__ = [
     "__version__",
@@ -28,4 +34,8 @@ __all__ = [
     "AnalyzerType",
     "ScanOrchestrator",
     "TokenBucketRateLimiter",
+    "BrowserConfigError",
+    "browser_context",
+    "get_browser",
+    "get_browser_config",
 ]

@@ -26,19 +26,13 @@ from __future__ import annotations
 import asyncio
 import gzip
 import json
-import os
-import sys
 import time
-from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx
 import structlog
 from dotenv import load_dotenv
-
-# Add python-sdk to path for owl_browser imports before loading local modules
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "python-sdk"))
 
 # Load environment variables
 load_dotenv()
@@ -48,31 +42,6 @@ from secureprobe.models import AnalyzerType, Finding, Severity
 from secureprobe.utils import safe_response_text
 
 logger = structlog.get_logger(__name__)
-
-
-def _get_browser_instance() -> Any:
-    """
-    Create a Browser instance with remote URL configuration if available.
-
-    Returns:
-        Configured Browser instance
-    """
-    from owl_browser import Browser, RemoteConfig
-
-    remote_url = os.getenv("OWL_BROWSER_URL")
-    remote_token = os.getenv("OWL_BROWSER_TOKEN")
-
-    if remote_url and remote_token:
-        logger.debug(
-            "memory_assault_using_remote_browser",
-            remote_url=remote_url,
-            has_token=bool(remote_token),
-        )
-        remote_config = RemoteConfig(url=remote_url, token=remote_token)
-        return Browser(remote=remote_config)
-    else:
-        logger.debug("memory_assault_using_local_browser")
-        return Browser()
 
 
 class MemoryAssaultAnalyzer(BaseAnalyzer):

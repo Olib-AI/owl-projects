@@ -1,0 +1,26 @@
+{
+  "targets": {
+    "release": {
+      "outFile": "build/crypto-core.wasm",
+      "sourceMap": false,
+      "optimizeLevel": 3,
+      "shrinkLevel": 2,
+      "converge": true,
+      "noAssert": true,
+      "runtime": "stub",
+      "exportRuntime": false,
+      "initialMemory": 16,
+      "maximumMemory": 256,
+      "enable": ["simd"]
+    },
+    "debug": {
+      "outFile": "build/crypto-core.debug.wasm",
+      "textFile": "build/crypto-core.debug.wat",
+      "sourceMap": true,
+      "debug": true,
+      "optimizeLevel": 0,
+      "shrinkLevel": 0
+    }
+  },
+  "options": {}
+}

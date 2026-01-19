@@ -1,7 +1,7 @@
 {
   "name": "@olib-ai/secure-embed",
-  "version": "1.0.0",
-  "description": "Securely embed third-party scripts without hardcoding credentials. Uses Service Worker encryption for runtime credential injection.",
+  "version": "2.0.0",
+  "description": "Securely embed third-party scripts without hardcoding credentials. Uses Service Worker + WebAssembly encryption for runtime credential injection with maximum security.",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -17,15 +17,13 @@
       "import": "./dist/react/SecureEmbed.js",
       "default": "./dist/react/SecureEmbed.js"
     },
-    "./vanilla": {
-      "types": "./dist/vanilla/secure-embed.d.ts",
-      "import": "./dist/vanilla/secure-embed.js",
-      "default": "./dist/vanilla/secure-embed.js"
-    },
     "./service-worker": {
-      "types": "./dist/service-worker.d.ts",
-      "import": "./dist/service-worker.js",
-      "default": "./dist/service-worker.js"
+      "import": "./dist/secure-sw.min.js",
+      "default": "./dist/secure-sw.min.js"
+    },
+    "./wasm": {
+      "import": "./wasm/build/crypto-core.wasm",
+      "default": "./wasm/build/crypto-core.wasm"
     }
   },
   "bin": {
@@ -33,16 +31,20 @@
   },
   "files": [
     "dist",
+    "wasm/build/*.wasm",
     "README.md"
   ],
   "scripts": {
-    "build": "tsc && npm run build:sw",
-    "build:sw": "esbuild src/service-worker.ts --bundle --format=iife --platform=browser --target=es2022 --outfile=dist/service-worker.js",
+    "build": "npm run build:wasm && tsc && npm run build:sw && npm run build:minify",
+    "build:wasm": "cd wasm && npx asc assembly/index.ts --target release",
+    "build:sw": "esbuild src/secure-core/secure-service-worker.ts --bundle --format=iife --platform=browser --target=es2022 --outfile=dist/secure-sw.js --external:*.wasm --define:DEBUG=false",
+    "build:minify": "esbuild dist/secure-sw.js --minify --mangle-props='^_' --keep-names=false --outfile=dist/secure-sw.min.js",
     "dev": "tsc --watch",
     "demo": "node examples/serve.js",
     "lint": "eslint src --ext .ts,.tsx",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "test:wasm": "cd wasm && npx asc assembly/index.ts --target debug"
   },
   "keywords": [
     "security",
@@ -51,6 +53,9 @@
     "encryption",
     "credentials",
     "third-party",
+    "webassembly",
+    "wasm",
+    "obfuscation",
     "intercom",
     "analytics",
     "chat-widget"
@@ -76,6 +81,7 @@
   "devDependencies": {
     "@types/node": "^20.10.0",
     "@types/react": "^18.2.0",
+    "assemblyscript": "^0.27.0",
     "esbuild": "^0.24.0",
     "typescript": "^5.3.0"
   },

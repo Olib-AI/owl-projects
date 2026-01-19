@@ -29,8 +29,6 @@ import hashlib
 import json
 import os
 import re
-import sys
-from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
@@ -39,45 +37,14 @@ import jwt
 import structlog
 from dotenv import load_dotenv
 
-# Add python-sdk to path for owl_browser imports before loading local modules
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "python-sdk"))
-
 # Load environment variables
 load_dotenv()
 
-from secureprobe.analyzers.base import BaseAnalyzer  # noqa: E402
-from secureprobe.models import AnalyzerType, Finding, Severity  # noqa: E402
-from secureprobe.utils import safe_response_text  # noqa: E402
+from secureprobe.analyzers.base import BaseAnalyzer
+from secureprobe.models import AnalyzerType, Finding, Severity
+from secureprobe.utils import safe_response_text
 
 logger = structlog.get_logger(__name__)
-
-
-def _get_browser_instance() -> Any:
-    """
-    Create a Browser instance with remote URL configuration if available.
-
-    Loads OWL_BROWSER_URL and OWL_BROWSER_TOKEN from environment.
-    Falls back to local browser if no remote configuration is present.
-
-    Returns:
-        Configured Browser instance
-    """
-    from owl_browser import Browser, RemoteConfig
-
-    remote_url = os.getenv("OWL_BROWSER_URL")
-    remote_token = os.getenv("OWL_BROWSER_TOKEN")
-
-    if remote_url and remote_token:
-        logger.debug(
-            "apt_analyzer_using_remote_browser",
-            remote_url=remote_url,
-            has_token=bool(remote_token),
-        )
-        remote_config = RemoteConfig(url=remote_url, token=remote_token)
-        return Browser(remote=remote_config)
-    else:
-        logger.debug("apt_analyzer_using_local_browser")
-        return Browser()
 
 
 class APTAttacksAnalyzer(BaseAnalyzer):

@@ -8,18 +8,13 @@ and aggregates results with deduplication.
 from __future__ import annotations
 
 import asyncio
-import os
-import re
-import sys
-from pathlib import Path
+import contextlib
 from typing import Any
+from urllib.parse import urljoin
 
 import httpx
 import structlog
 from dotenv import load_dotenv
-from urllib.parse import urljoin, urlparse
-
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "python-sdk"))
 
 # Load environment variables from .env file
 load_dotenv()
@@ -47,39 +42,16 @@ from secureprobe.analyzers import (
     SessionSecurityAnalyzer,
     TLSAnalyzer,
 )
-from secureprobe.models import AnalyzerType, Finding, ScanConfig, ScanMode, ScanResult
+from secureprobe.models import AnalyzerType, Finding, ScanConfig, ScanResult
 from secureprobe.rate_limiter import TokenBucketRateLimiter
-from secureprobe.utils import is_same_origin, normalize_url
+from secureprobe.utils import (
+    browser_context,
+    get_browser,
+    is_same_origin,
+    normalize_url,
+)
 
 logger = structlog.get_logger(__name__)
-
-
-def _get_browser_instance() -> Any:
-    """
-    Create a Browser instance with remote URL configuration if available.
-
-    Loads OWL_BROWSER_URL and OWL_BROWSER_TOKEN from environment.
-    Falls back to local browser if no remote configuration is present.
-
-    Returns:
-        Configured Browser instance
-    """
-    from owl_browser import Browser, RemoteConfig
-
-    remote_url = os.getenv("OWL_BROWSER_URL")
-    remote_token = os.getenv("OWL_BROWSER_TOKEN")
-
-    if remote_url and remote_token:
-        logger.info(
-            "using_remote_browser",
-            remote_url=remote_url,
-            has_token=bool(remote_token),
-        )
-        remote_config = RemoteConfig(url=remote_url, token=remote_token)
-        return Browser(remote=remote_config)
-    else:
-        logger.info("using_local_browser")
-        return Browser()
 
 
 class AnalyzerPool:
@@ -258,26 +230,35 @@ class ScanOrchestrator:
         logger.info("verifying_authorization", target=self.config.target_url)
 
         try:
-            with _get_browser_instance() as browser:
-                page = browser.new_page()
+            async with get_browser() as browser:
+                async with browser_context(browser) as context_id:
+                    # Check robots.txt
+                    robots_url = urljoin(self.config.target_url, "/robots.txt")
+                    try:
+                        await browser.navigate(
+                            context_id=context_id, url=robots_url, timeout=10000
+                        )
+                        robots_result = await browser.extract_text(context_id=context_id)
+                        robots_content = robots_result.get("text", "") if isinstance(robots_result, dict) else ""
+                        if "Disallow: /" in robots_content and "User-agent: *" in robots_content:
+                            logger.warning("robots_disallow_all", url=self.config.target_url)
+                    except Exception:
+                        pass
 
-                robots_url = urljoin(self.config.target_url, "/robots.txt")
-                try:
-                    page.goto(robots_url, timeout=10000)
-                    robots_content = page.extract_text()
-                    if "Disallow: /" in robots_content and "User-agent: *" in robots_content:
-                        logger.warning("robots_disallow_all", url=self.config.target_url)
-                except Exception:
-                    pass
+                    # Navigate to target URL
+                    await browser.navigate(
+                        context_id=context_id,
+                        url=self.config.target_url,
+                        timeout=int(self.config.timeout * 1000),
+                    )
 
-                page.goto(self.config.target_url, timeout=self.config.timeout * 1000)
-                current_url = page.get_current_url()
+                    # Get current URL to verify navigation
+                    page_info = await browser.get_page_info(context_id=context_id)
+                    current_url = page_info.get("url", "") if isinstance(page_info, dict) else ""
 
-                if current_url:
-                    logger.info("authorization_verified", url=current_url)
-                    return True
-
-                page.close()
+                    if current_url:
+                        logger.info("authorization_verified", url=current_url)
+                        return True
 
         except Exception as e:
             logger.error("authorization_check_failed", error=str(e))
@@ -369,84 +350,107 @@ class ScanOrchestrator:
         page_data["headers"] = await self._fetch_headers(url)
 
         try:
-            with _get_browser_instance() as browser:
-                page = browser.new_page()
+            async with get_browser() as browser:
+                async with browser_context(browser) as context_id:
+                    # Enable network logging
+                    await browser.enable_network_logging(context_id=context_id, enable=True)
 
-                page.enable_network_logging(True)
-
-                page.goto(url, timeout=self.config.timeout * 1000)
-
-                try:
-                    page.wait_for_network_idle(idle_time=500, timeout=5000)
-                except Exception:
-                    pass
-
-                page_data["html"] = page.get_html()
-                page_data["cookies"] = self._convert_cookies(page.get_cookies())
-
-                network_log = page.get_network_log()
-                page_data["network_log"] = [
-                    {
-                        "url": getattr(entry, "url", ""),
-                        "method": getattr(entry, "method", ""),
-                        "status": getattr(entry, "status", 0),
-                    }
-                    for entry in network_log[:100]
-                ]
-
-                try:
-                    scripts_result = page.evaluate(
-                        """
-                        (() => {
-                            const scripts = document.querySelectorAll('script');
-                            return Array.from(scripts).map(s => s.textContent || '').filter(t => t.length > 0);
-                        })()
-                        """,
-                        return_value=True,
+                    # Navigate to URL
+                    await browser.navigate(
+                        context_id=context_id,
+                        url=url,
+                        timeout=int(self.config.timeout * 1000),
                     )
-                    if isinstance(scripts_result, list):
-                        page_data["scripts"] = scripts_result
-                except Exception:
-                    pass
 
-                try:
-                    forms_result = page.evaluate(
-                        """
-                        (() => {
-                            const forms = document.querySelectorAll('form');
-                            return Array.from(forms).map(form => ({
-                                id: form.id || form.name || '',
-                                action: form.action || '',
-                                method: form.method || 'get',
-                                inputs: Array.from(form.querySelectorAll('input, select, textarea')).map(input => ({
-                                    name: input.name || '',
-                                    type: input.type || '',
-                                    autocomplete: input.autocomplete || ''
-                                }))
-                            }));
-                        })()
-                        """,
-                        return_value=True,
-                    )
-                    if isinstance(forms_result, list):
-                        page_data["forms"] = forms_result
-                except Exception:
-                    pass
+                    # Wait for network idle
+                    with contextlib.suppress(Exception):
+                        await browser.wait_for_network_idle(
+                            context_id=context_id, idle_time=500, timeout=5000
+                        )
 
-                page.close()
+                    # Get HTML content
+                    html_result = await browser.get_html(context_id=context_id)
+                    page_data["html"] = html_result.get("html", "") if isinstance(html_result, dict) else ""
+
+                    # Get cookies
+                    cookies_result = await browser.get_cookies(context_id=context_id)
+                    raw_cookies = cookies_result.get("cookies", []) if isinstance(cookies_result, dict) else []
+                    page_data["cookies"] = self._convert_cookies(raw_cookies)
+
+                    # Get network log
+                    network_result = await browser.get_network_log(context_id=context_id)
+                    network_entries = network_result.get("entries", []) if isinstance(network_result, dict) else []
+                    page_data["network_log"] = [
+                        {
+                            "url": entry.get("url", "") if isinstance(entry, dict) else "",
+                            "method": entry.get("method", "") if isinstance(entry, dict) else "",
+                            "status": entry.get("status", 0) if isinstance(entry, dict) else 0,
+                        }
+                        for entry in network_entries[:100]
+                    ]
+
+                    # Extract scripts
+                    try:
+                        scripts_result = await browser.evaluate(
+                            context_id=context_id,
+                            script="""
+                            (() => {
+                                const scripts = document.querySelectorAll('script');
+                                return Array.from(scripts).map(s => s.textContent || '').filter(t => t.length > 0);
+                            })()
+                            """,
+                            return_value=True,
+                        )
+                        result_value = scripts_result.get("result") if isinstance(scripts_result, dict) else scripts_result
+                        if isinstance(result_value, list):
+                            page_data["scripts"] = result_value
+                    except Exception:
+                        pass
+
+                    # Extract forms
+                    try:
+                        forms_result = await browser.evaluate(
+                            context_id=context_id,
+                            script="""
+                            (() => {
+                                const forms = document.querySelectorAll('form');
+                                return Array.from(forms).map(form => ({
+                                    id: form.id || form.name || '',
+                                    action: form.action || '',
+                                    method: form.method || 'get',
+                                    inputs: Array.from(form.querySelectorAll('input, select, textarea')).map(input => ({
+                                        name: input.name || '',
+                                        type: input.type || '',
+                                        autocomplete: input.autocomplete || ''
+                                    }))
+                                }));
+                            })()
+                            """,
+                            return_value=True,
+                        )
+                        result_value = forms_result.get("result") if isinstance(forms_result, dict) else forms_result
+                        if isinstance(result_value, list):
+                            page_data["forms"] = result_value
+                    except Exception:
+                        pass
 
                 # Create additional browser contexts for isolation testing
                 if self.config.browser_contexts > 1:
                     for i in range(1, self.config.browser_contexts):
                         try:
-                            context_page = browser.new_page()
-                            context_page.goto(url, timeout=self.config.timeout * 1000)
-                            context_cookies = self._convert_cookies(context_page.get_cookies())
-                            page_data["browser_contexts"].append({
-                                "context_id": i,
-                                "cookies": context_cookies,
-                            })
-                            context_page.close()
+                            async with browser_context(browser) as extra_context_id:
+                                await browser.navigate(
+                                    context_id=extra_context_id,
+                                    url=url,
+                                    timeout=int(self.config.timeout * 1000),
+                                )
+                                cookies_result = await browser.get_cookies(context_id=extra_context_id)
+                                raw_cookies = cookies_result.get("cookies", []) if isinstance(cookies_result, dict) else []
+                                context_cookies = self._convert_cookies(raw_cookies)
+                                page_data["browser_contexts"].append({
+                                    "context_id": i,
+                                    "cookies": context_cookies,
+                                })
                         except Exception as ctx_err:
                             logger.debug(
                                 "browser_context_error",
@@ -491,10 +495,23 @@ class ScanOrchestrator:
         return headers
 
     def _convert_cookies(self, cookies: list[Any]) -> list[dict[str, Any]]:
-        """Convert cookie objects to dictionaries."""
+        """Convert cookie objects/dicts to normalized dictionaries."""
         result: list[dict[str, Any]] = []
         for cookie in cookies:
-            if hasattr(cookie, "__dict__"):
+            if isinstance(cookie, dict):
+                # SDK v2 returns dicts, normalize field names
+                result.append({
+                    "name": cookie.get("name", ""),
+                    "value": cookie.get("value", ""),
+                    "domain": cookie.get("domain", ""),
+                    "path": cookie.get("path", "/"),
+                    "secure": cookie.get("secure", False),
+                    "httponly": cookie.get("httpOnly", cookie.get("http_only", False)),
+                    "samesite": str(cookie.get("sameSite", cookie.get("same_site", ""))).lower(),
+                    "expires": cookie.get("expires", -1),
+                })
+            elif hasattr(cookie, "__dict__"):
+                # Legacy: handle object-style cookies
                 result.append({
                     "name": getattr(cookie, "name", ""),
                     "value": getattr(cookie, "value", ""),
@@ -505,8 +522,6 @@ class ScanOrchestrator:
                     "samesite": str(getattr(cookie, "same_site", "")).lower(),
                     "expires": getattr(cookie, "expires", -1),
                 })
-            elif isinstance(cookie, dict):
-                result.append(cookie)
         return result
 
     def _extract_links(self, base_url: str, html: str) -> list[str]:

@@ -3,6 +3,11 @@ Self-healing test engine for automatic recovery from UI changes.
 
 Uses deterministic strategies (no AI/LLM dependency) to find alternative selectors.
 Strategies: text matching, fuzzy attributes, XPath fallbacks, DOM structure analysis.
+
+SDK v2 Notes:
+- heal_selector_async method added for async browser operations
+- Uses OwlBrowser and context_id pattern
+- Browser methods like is_visible require await
 """
 
 from __future__ import annotations
@@ -18,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 import structlog
 
 if TYPE_CHECKING:
-    from owl_browser import BrowserContext
+    from owl_browser import OwlBrowser
 
 logger = structlog.get_logger(__name__)
 
@@ -240,8 +245,349 @@ class SelfHealingEngine:
             error="No suitable replacement selector found",
         )
 
+    async def heal_selector_async(
+        self,
+        browser: OwlBrowser,
+        context_id: str,
+        original_selector: str,
+        action_context: str | None = None,
+        element_description: str | None = None,
+    ) -> HealingResult:
+        """
+        Attempt to heal a broken selector using deterministic strategies (SDK v2 async).
+
+        Args:
+            browser: OwlBrowser instance
+            context_id: Browser context ID
+            original_selector: The selector that failed
+            action_context: Context about what action was being performed
+            element_description: Text hint for the element (not AI-based)
+
+        Returns:
+            HealingResult with success status and healed selector if found
+        """
+        start_time = time.monotonic()
+        self._log.info(
+            "Starting selector healing (deterministic, async)",
+            original=original_selector,
+            context=action_context,
+        )
+
+        # Strategy 1: Check cached successful selector
+        if original_selector in self._selector_cache:
+            cached = self._selector_cache[original_selector]
+            if await self._try_selector_async(browser, context_id, cached):
+                return HealingResult(
+                    success=True,
+                    original_selector=original_selector,
+                    healed_selector=cached,
+                    strategy_used=HealingStrategy.CACHED_HISTORY,
+                    confidence=0.98,
+                    healing_time_ms=int((time.monotonic() - start_time) * 1000),
+                )
+
+        # Strategy 2: Check history for last working selector
+        history = self._selector_history.get(original_selector)
+        if history and history.last_working_selector != original_selector:
+            if await self._try_selector_async(browser, context_id, history.last_working_selector):
+                self._selector_cache[original_selector] = history.last_working_selector
+                return HealingResult(
+                    success=True,
+                    original_selector=original_selector,
+                    healed_selector=history.last_working_selector,
+                    strategy_used=HealingStrategy.DOM_STRUCTURE,
+                    confidence=0.95,
+                    healing_time_ms=int((time.monotonic() - start_time) * 1000),
+                )
+
+        candidates: list[SelectorCandidate] = []
+
+        # Strategy 3: Common ID/name/data-testid fallbacks from selector parsing
+        common_fallbacks = await self._find_by_common_patterns_async(browser, context_id, original_selector)
+        candidates.extend(common_fallbacks)
+
+        # Strategy 4: Text content matching (from selector or description)
+        text_hint = element_description or self._extract_text_hint(original_selector)
+        if text_hint:
+            text_candidates = await self._find_by_text_match_async(browser, context_id, text_hint)
+            candidates.extend(text_candidates)
+
+        # Strategy 5: Fuzzy attribute matching
+        attr_candidates = await self._find_by_attribute_fuzzy_async(browser, context_id, original_selector)
+        candidates.extend(attr_candidates)
+
+        # Strategy 6: XPath alternatives
+        xpath_candidates = await self._find_by_xpath_fallback_async(browser, context_id, original_selector)
+        candidates.extend(xpath_candidates)
+
+        # Strategy 7: CSS selector variations
+        css_candidates = await self._find_by_css_variations_async(browser, context_id, original_selector)
+        candidates.extend(css_candidates)
+
+        # Sort by confidence and limit
+        candidates.sort(key=lambda c: c.confidence, reverse=True)
+        candidates = candidates[: self.MAX_CANDIDATES]
+
+        for candidate in candidates:
+            if candidate.confidence < self._min_confidence:
+                continue
+
+            if await self._try_selector_async(browser, context_id, candidate.selector):
+                self._update_history(
+                    original_selector,
+                    candidate.selector,
+                    candidate,
+                )
+                self._selector_cache[original_selector] = candidate.selector
+
+                healing_time = int((time.monotonic() - start_time) * 1000)
+                self._log.info(
+                    "Selector healed successfully",
+                    original=original_selector,
+                    healed=candidate.selector,
+                    strategy=candidate.strategy,
+                    confidence=candidate.confidence,
+                    time_ms=healing_time,
+                )
+
+                return HealingResult(
+                    success=True,
+                    original_selector=original_selector,
+                    healed_selector=candidate.selector,
+                    strategy_used=candidate.strategy,
+                    confidence=candidate.confidence,
+                    candidates_evaluated=len(candidates),
+                    healing_time_ms=healing_time,
+                )
+
+        healing_time = int((time.monotonic() - start_time) * 1000)
+        self._log.warning(
+            "Selector healing failed",
+            original=original_selector,
+            candidates_tried=len(candidates),
+            time_ms=healing_time,
+        )
+
+        if history:
+            history.failure_count += 1
+
+        return HealingResult(
+            success=False,
+            original_selector=original_selector,
+            candidates_evaluated=len(candidates),
+            healing_time_ms=healing_time,
+            error="No suitable replacement selector found",
+        )
+
+    async def _try_selector_async(self, browser: OwlBrowser, context_id: str, selector: str) -> bool:
+        """Test if a selector finds an element (async version)."""
+        try:
+            result = await browser.is_visible(context_id=context_id, selector=selector)
+            return result.get("visible", False) if isinstance(result, dict) else bool(result)
+        except Exception:
+            return False
+
+    async def _find_by_common_patterns_async(
+        self, browser: OwlBrowser, context_id: str, original_selector: str
+    ) -> list[SelectorCandidate]:
+        """Find elements using common selector patterns (no AI, async version)."""
+        candidates: list[SelectorCandidate] = []
+        attrs = self._parse_selector_attributes(original_selector)
+
+        patterns_to_try: list[tuple[str, HealingStrategy, float]] = []
+
+        if "id" in attrs:
+            element_id = attrs["id"]
+            patterns_to_try.extend([
+                (f"#{element_id}", HealingStrategy.ID_FALLBACK, 0.95),
+                (f"[id='{element_id}']", HealingStrategy.ID_FALLBACK, 0.94),
+                (f"[id*='{element_id}']", HealingStrategy.ID_FALLBACK, 0.80),
+            ])
+
+        if "name" in attrs:
+            name = attrs["name"]
+            patterns_to_try.extend([
+                (f"[name='{name}']", HealingStrategy.NAME_FALLBACK, 0.90),
+                (f"[name*='{name}']", HealingStrategy.NAME_FALLBACK, 0.75),
+            ])
+
+        if "data-testid" in attrs:
+            testid = attrs["data-testid"]
+            patterns_to_try.extend([
+                (f"[data-testid='{testid}']", HealingStrategy.DATA_TESTID, 0.92),
+                (f"[data-testid*='{testid}']", HealingStrategy.DATA_TESTID, 0.78),
+            ])
+
+        if "aria-label" in attrs:
+            label = attrs["aria-label"]
+            patterns_to_try.extend([
+                (f"[aria-label='{label}']", HealingStrategy.ARIA_LABEL, 0.88),
+                (f"[aria-label*='{label}']", HealingStrategy.ARIA_LABEL, 0.72),
+            ])
+
+        if "placeholder" in attrs:
+            placeholder = attrs["placeholder"]
+            patterns_to_try.extend([
+                (f"[placeholder='{placeholder}']", HealingStrategy.PLACEHOLDER_FALLBACK, 0.85),
+                (f"[placeholder*='{placeholder}']", HealingStrategy.PLACEHOLDER_FALLBACK, 0.70),
+            ])
+
+        for selector, strategy, confidence in patterns_to_try:
+            if selector != original_selector and await self._try_selector_async(browser, context_id, selector):
+                candidates.append(
+                    SelectorCandidate(
+                        selector=selector,
+                        strategy=strategy,
+                        confidence=confidence,
+                    )
+                )
+
+        return candidates
+
+    async def _find_by_text_match_async(
+        self, browser: OwlBrowser, context_id: str, text_hint: str
+    ) -> list[SelectorCandidate]:
+        """Find elements by text content matching (deterministic, async)."""
+        candidates: list[SelectorCandidate] = []
+
+        safe_hint = text_hint.replace("'", "\\'")
+        normalized_hint = text_hint.lower().replace(" ", "-").replace("_", "-")
+
+        selectors_to_try: list[tuple[str, float]] = [
+            (f"//*[normalize-space(text())='{safe_hint}']", 0.90),
+            (f"//*[contains(text(), '{safe_hint}')]", 0.82),
+            (f"[data-testid*='{normalized_hint}']", 0.80),
+            (f"[aria-label*='{text_hint}']", 0.79),
+            (f"[title*='{text_hint}']", 0.75),
+            (f"[placeholder*='{text_hint}']", 0.74),
+            (f"[value='{text_hint}']", 0.82),
+        ]
+
+        for selector, confidence in selectors_to_try:
+            if await self._try_selector_async(browser, context_id, selector):
+                candidates.append(
+                    SelectorCandidate(
+                        selector=selector,
+                        strategy=HealingStrategy.TEXT_MATCH,
+                        confidence=confidence,
+                        element_text=text_hint,
+                    )
+                )
+
+        return candidates
+
+    async def _find_by_attribute_fuzzy_async(
+        self, browser: OwlBrowser, context_id: str, original_selector: str
+    ) -> list[SelectorCandidate]:
+        """Find elements by fuzzy attribute matching (async)."""
+        candidates: list[SelectorCandidate] = []
+
+        attributes = self._parse_selector_attributes(original_selector)
+        if not attributes:
+            return candidates
+
+        for attr_name, attr_value in attributes.items():
+            fuzzy_selectors = [
+                f"[{attr_name}='{attr_value}']",
+                f"[{attr_name}*='{attr_value}']",
+                f"[{attr_name}^='{attr_value[:len(attr_value)//2]}']" if len(attr_value) > 4 else None,
+            ]
+
+            for selector in filter(None, fuzzy_selectors):
+                if selector != original_selector and await self._try_selector_async(browser, context_id, selector):
+                    confidence = 0.75 if "*=" in selector else 0.85
+                    candidates.append(
+                        SelectorCandidate(
+                            selector=selector,
+                            strategy=HealingStrategy.ATTRIBUTE_FUZZY,
+                            confidence=confidence,
+                        )
+                    )
+
+        return candidates
+
+    async def _find_by_xpath_fallback_async(
+        self, browser: OwlBrowser, context_id: str, original_selector: str
+    ) -> list[SelectorCandidate]:
+        """Generate XPath fallback selectors (async)."""
+        candidates: list[SelectorCandidate] = []
+
+        if original_selector.startswith("//") or original_selector.startswith("/"):
+            return candidates
+
+        if original_selector.startswith("#"):
+            element_id = original_selector[1:].split("[")[0].split(".")[0]
+            xpath = f"//*[@id='{element_id}']"
+            if await self._try_selector_async(browser, context_id, xpath):
+                candidates.append(
+                    SelectorCandidate(
+                        selector=xpath,
+                        strategy=HealingStrategy.XPATH_FALLBACK,
+                        confidence=0.9,
+                    )
+                )
+
+        if "." in original_selector:
+            classes = original_selector.replace("#", " ").replace("[", " ").split(".")
+            classes = [c.strip() for c in classes if c.strip() and not c.startswith("=")]
+            if classes:
+                xpath = f"//*[contains(@class, '{classes[0]}')]"
+                if await self._try_selector_async(browser, context_id, xpath):
+                    candidates.append(
+                        SelectorCandidate(
+                            selector=xpath,
+                            strategy=HealingStrategy.XPATH_FALLBACK,
+                            confidence=0.7,
+                        )
+                    )
+
+        return candidates
+
+    async def _find_by_css_variations_async(
+        self, browser: OwlBrowser, context_id: str, original_selector: str
+    ) -> list[SelectorCandidate]:
+        """Generate CSS selector variations (async)."""
+        candidates: list[SelectorCandidate] = []
+        attrs = self._parse_selector_attributes(original_selector)
+
+        tag_match = re.match(r"^([a-zA-Z][a-zA-Z0-9]*)", original_selector)
+        tag = tag_match.group(1) if tag_match else "*"
+
+        variations: list[tuple[str, float]] = []
+
+        if "class" in attrs:
+            classes = attrs["class"].split()
+            for cls in classes[:3]:
+                variations.extend([
+                    (f"{tag}.{cls}", 0.75),
+                    (f".{cls}", 0.70),
+                    (f"[class*='{cls}']", 0.65),
+                ])
+
+        if "id" in attrs:
+            element_id = attrs["id"]
+            if len(element_id) > 5:
+                partial = element_id[:len(element_id)//2]
+                variations.append((f"[id^='{partial}']", 0.72))
+
+        for attr in ["type", "role", "data-type"]:
+            if attr in attrs:
+                variations.append((f"{tag}[{attr}='{attrs[attr]}']", 0.68))
+
+        for selector, confidence in variations:
+            if selector != original_selector and await self._try_selector_async(browser, context_id, selector):
+                candidates.append(
+                    SelectorCandidate(
+                        selector=selector,
+                        strategy=HealingStrategy.ATTRIBUTE_FUZZY,
+                        confidence=confidence,
+                    )
+                )
+
+        return candidates
+
     def _find_by_common_patterns(
-        self, page: BrowserContext, original_selector: str
+        self, page: OwlBrowser, original_selector: str
     ) -> list[SelectorCandidate]:
         """Find elements using common selector patterns (no AI)."""
         candidates: list[SelectorCandidate] = []

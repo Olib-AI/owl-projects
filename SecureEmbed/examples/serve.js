@@ -25,6 +25,7 @@ const MIME_TYPES = {
   '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon',
   '.map': 'application/json',
+  '.wasm': 'application/wasm',
 };
 
 /**
@@ -32,26 +33,36 @@ const MIME_TYPES = {
  * Handles the Service Worker requirement to be at root.
  */
 function resolveFilePath(urlPath) {
-  // Service Worker must be at root
+  // Service Worker (Wasm-secured)
   if (urlPath === '/secure-embed-sw.js') {
-    return join(ROOT_DIR, 'dist', 'service-worker.js');
+    return join(ROOT_DIR, 'dist', 'secure-sw.min.js');
   }
-  
+
+  // Wasm crypto core module
+  if (urlPath === '/secure-embed-core.wasm') {
+    return join(ROOT_DIR, 'wasm', 'build', 'crypto-core.wasm');
+  }
+
   // Handle root path
   if (urlPath === '/' || urlPath === '') {
     return join(ROOT_DIR, 'examples', 'index.html');
   }
-  
+
   // Handle dist files
   if (urlPath.startsWith('/dist/')) {
     return join(ROOT_DIR, urlPath.slice(1));
   }
-  
+
+  // Handle wasm files
+  if (urlPath.startsWith('/wasm/')) {
+    return join(ROOT_DIR, urlPath.slice(1));
+  }
+
   // Handle examples files
   if (urlPath.startsWith('/examples/')) {
     return join(ROOT_DIR, urlPath.slice(1));
   }
-  
+
   // Default to examples directory
   return join(ROOT_DIR, 'examples', urlPath.slice(1));
 }
@@ -62,9 +73,9 @@ function resolveFilePath(urlPath) {
 async function handleRequest(req, res) {
   const url = new URL(req.url ?? '/', `http://localhost:${PORT}`);
   const filePath = resolveFilePath(url.pathname);
-  
+
   console.log(`[${new Date().toISOString()}] ${req.method} ${url.pathname} -> ${filePath}`);
-  
+
   try {
     // Security: prevent directory traversal
     const normalizedPath = resolve(filePath);
@@ -73,7 +84,7 @@ async function handleRequest(req, res) {
       res.end('Forbidden');
       return;
     }
-    
+
     // Check file exists
     const stats = await stat(normalizedPath);
     if (!stats.isFile()) {
@@ -81,11 +92,11 @@ async function handleRequest(req, res) {
       res.end('Not Found');
       return;
     }
-    
+
     const ext = extname(normalizedPath);
     const mimeType = MIME_TYPES[ext] ?? 'application/octet-stream';
     const content = await readFile(normalizedPath);
-    
+
     // Set headers
     const headers = {
       'Content-Type': mimeType,
@@ -94,15 +105,15 @@ async function handleRequest(req, res) {
       // Required for Service Worker to work at root scope
       'Service-Worker-Allowed': '/',
     };
-    
+
     // CORS headers for development
     headers['Access-Control-Allow-Origin'] = '*';
     headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS';
     headers['Access-Control-Allow-Headers'] = 'Content-Type';
-    
+
     res.writeHead(200, headers);
     res.end(content);
-    
+
   } catch (err) {
     if (err.code === 'ENOENT') {
       console.error(`  404: File not found - ${filePath}`);
@@ -122,17 +133,18 @@ const server = createServer(handleRequest);
 server.listen(PORT, () => {
   console.log('');
   console.log('===========================================');
-  console.log('  SecureEmbed Demo Server');
+  console.log('  SecureEmbed Demo Server v2.0 (Wasm)');
   console.log('===========================================');
   console.log('');
   console.log(`  Local:   http://localhost:${PORT}`);
   console.log(`  Network: http://127.0.0.1:${PORT}`);
   console.log('');
   console.log('  Files served:');
-  console.log('    /                    -> examples/index.html');
-  console.log('    /secure-embed-sw.js  -> dist/service-worker.js');
-  console.log('    /dist/*              -> dist/*');
-  console.log('    /examples/*          -> examples/*');
+  console.log('    /                       -> examples/index.html');
+  console.log('    /secure-embed-sw.js     -> dist/secure-sw.min.js (Wasm)');
+  console.log('    /secure-embed-core.wasm -> wasm/build/crypto-core.wasm');
+  console.log('    /dist/*                 -> dist/*');
+  console.log('    /wasm/*                 -> wasm/*');
   console.log('');
   console.log('  Press Ctrl+C to stop');
   console.log('');

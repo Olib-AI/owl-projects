@@ -7,6 +7,7 @@ Provides commands for running tests, validating specs, and generating CI configs
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
 import sys
@@ -363,8 +364,13 @@ def configure_logging(verbose: bool) -> None:
 
 def cmd_run(args: argparse.Namespace) -> int:
     """Run test specifications."""
+    return asyncio.run(_cmd_run_async(args))
+
+
+async def _cmd_run_async(args: argparse.Namespace) -> int:
+    """Async implementation of cmd_run."""
     from dotenv import load_dotenv
-    from owl_browser import Browser, RemoteConfig
+    from owl_browser import OwlBrowser, RemoteConfig
 
     # Load environment variables from .env file
     load_dotenv()
@@ -408,9 +414,10 @@ def cmd_run(args: argparse.Namespace) -> int:
         return 1
 
     logger.info("Connecting to remote browser", url=owl_browser_url)
-    remote_config = RemoteConfig(url=owl_browser_url, token=owl_browser_token)
-    browser = Browser(remote=remote_config)
-    browser.launch()  # Connect to remote browser server
+    # SDK v2: api_prefix="" for direct connection without /api prefix
+    remote_config = RemoteConfig(url=owl_browser_url, token=owl_browser_token, api_prefix="")
+    browser = OwlBrowser(remote_config)
+    await browser.connect()
 
     # Determine timeout settings based on CLI arguments
     if args.fast_mode:
@@ -440,13 +447,13 @@ def cmd_run(args: argparse.Namespace) -> int:
     try:
         for spec in specs:
             if isinstance(spec, TestSuite):
-                results = runner.run_suite(spec, variables=variables)
+                results = await runner.run_suite(spec, variables=variables)
                 all_results.extend(results)
             else:
-                result = runner.run_spec(spec, variables=variables)
+                result = await runner.run_spec(spec, variables=variables)
                 all_results.append(result)
     finally:
-        browser.close()
+        await browser.close()
 
     output = format_results(all_results, args.output_format)
 
@@ -825,8 +832,13 @@ def cmd_server(args: argparse.Namespace) -> int:
 
 def cmd_build(args: argparse.Namespace) -> int:
     """Auto-generate YAML test specification from a webpage."""
+    return asyncio.run(_cmd_build_async(args))
+
+
+async def _cmd_build_async(args: argparse.Namespace) -> int:
+    """Async implementation of cmd_build."""
     from dotenv import load_dotenv
-    from owl_browser import Browser, RemoteConfig
+    from owl_browser import OwlBrowser, RemoteConfig
 
     from autoqa.builder.test_builder import AutoTestBuilder, BuilderConfig
 
@@ -843,9 +855,10 @@ def cmd_build(args: argparse.Namespace) -> int:
         return 1
 
     logger.info("Connecting to remote browser", url=owl_browser_url)
-    remote_config = RemoteConfig(url=owl_browser_url, token=owl_browser_token)
-    browser = Browser(remote=remote_config)
-    browser.launch()
+    # SDK v2: api_prefix="" for direct connection without /api prefix
+    remote_config = RemoteConfig(url=owl_browser_url, token=owl_browser_token, api_prefix="")
+    browser = OwlBrowser(remote_config)
+    await browser.connect()
 
     try:
         # Create builder configuration
@@ -863,7 +876,7 @@ def cmd_build(args: argparse.Namespace) -> int:
 
         # Run the builder
         builder = AutoTestBuilder(browser=browser, config=config)
-        yaml_content = builder.build()
+        yaml_content = await builder.build()
 
         # Output results
         if args.output:
@@ -882,7 +895,7 @@ def cmd_build(args: argparse.Namespace) -> int:
         return 1
 
     finally:
-        browser.close()
+        await browser.close()
 
 
 if __name__ == "__main__":

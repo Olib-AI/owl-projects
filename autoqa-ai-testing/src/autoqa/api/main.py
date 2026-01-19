@@ -413,7 +413,7 @@ def create_app() -> FastAPI:
         Analyzes the specified URL (and optionally crawls same-domain links)
         to discover interactive elements and generate a complete test spec.
         """
-        from owl_browser import Browser, RemoteConfig
+        from owl_browser import OwlBrowser, RemoteConfig
 
         from autoqa.builder.test_builder import AutoTestBuilder, BuilderConfig
 
@@ -427,9 +427,10 @@ def create_app() -> FastAPI:
             )
 
         try:
-            remote_config = RemoteConfig(url=owl_browser_url, token=owl_browser_token)
-            browser = Browser(remote=remote_config)
-            browser.launch()
+            # SDK v2: api_prefix="" for direct connection without /api prefix
+            remote_config = RemoteConfig(url=owl_browser_url, token=owl_browser_token, api_prefix="")
+            browser = OwlBrowser(remote_config)
+            await browser.connect()
 
             try:
                 config = BuilderConfig(
@@ -443,7 +444,7 @@ def create_app() -> FastAPI:
                 )
 
                 builder = AutoTestBuilder(browser=browser, config=config)
-                yaml_content = builder.build()
+                yaml_content = await builder.build()
 
                 # Extract summary from page analyses
                 pages_analyzed = len(builder._page_analyses)
@@ -463,7 +464,7 @@ def create_app() -> FastAPI:
                 }
 
             finally:
-                browser.close()
+                await browser.close()
 
         except Exception as e:
             logger.error("Build failed", url=url, error=str(e))

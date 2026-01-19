@@ -1,16 +1,18 @@
 """
 Test runner for executing DSL test specifications.
 
-Executes tests using owl-browser with:
+Executes tests using owl-browser SDK v2 with:
 - Self-healing selector recovery (no AI dependency)
 - Automatic retries with exponential backoff
 - Smart waits (network idle, selectors)
 - Screenshot capture on failure
 - Network log capture for debugging
+- Async-first design with context management
 """
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import re
 import time
@@ -36,7 +38,7 @@ from autoqa.versioning.history_tracker import TestRunHistory
 from autoqa.versioning.models import VersioningConfig
 
 if TYPE_CHECKING:
-    from owl_browser import Browser, BrowserContext
+    from owl_browser import OwlBrowser
 
 logger = structlog.get_logger(__name__)
 
@@ -119,7 +121,7 @@ class PageRecoveryError(Exception):
 
 class TestRunner:
     """
-    Executes test specifications using owl-browser.
+    Executes test specifications using owl-browser SDK v2.
 
     Features:
     - Self-healing selector recovery (deterministic, no AI)
@@ -132,6 +134,13 @@ class TestRunner:
     - Screenshot capture on failure
     - Network log capture for debugging
     - Variable capture and interpolation
+    - Async-first design with context management
+
+    SDK v2 Notes:
+    - Uses OwlBrowser instead of Browser
+    - All browser operations are async and require context_id
+    - Context is created per test and closed after completion
+    - Methods use await browser.method(context_id=..., ...)
     """
 
     # Actions that require element visibility/enabled checks
@@ -155,7 +164,7 @@ class TestRunner:
 
     def __init__(
         self,
-        browser: Browser,
+        browser: OwlBrowser,
         healing_engine: SelfHealingEngine | None = None,
         artifact_dir: str | Path | None = None,
         record_video: bool = False,
@@ -197,10 +206,10 @@ class TestRunner:
 
         self._artifact_dir.mkdir(parents=True, exist_ok=True)
 
-    def run_spec(
+    async def run_spec(
         self,
         spec: TestSpec,
-        page: BrowserContext | None = None,
+        context_id: str | None = None,
         variables: dict[str, Any] | None = None,
     ) -> TestRunResult:
         """
@@ -208,11 +217,16 @@ class TestRunner:
 
         Args:
             spec: Test specification to run
-            page: Browser page to use (creates new if not provided)
+            context_id: Browser context ID to use (creates new if not provided)
             variables: Additional variables for interpolation
 
         Returns:
             TestRunResult with execution details
+
+        SDK v2 Notes:
+            - Creates a new context via browser.create_context() if not provided
+            - All operations use context_id parameter
+            - Context is closed after completion if created here
         """
         result = TestRunResult(
             test_name=spec.name,
@@ -222,24 +236,25 @@ class TestRunner:
             variables={**(variables or {}), **spec.variables},
         )
 
-        own_page = page is None
-        if own_page:
-            page = self._browser.new_page()
+        own_context = context_id is None
+        if own_context:
+            ctx = await self._browser.create_context()
+            context_id = ctx["context_id"]
 
-        self._log.info("Starting test run", test=spec.name, steps=len(spec.steps))
+        self._log.info("Starting test run", test=spec.name, steps=len(spec.steps), context_id=context_id)
 
         try:
             if self._record_video:
-                page.start_video_recording(fps=30)
+                await self._browser.start_video_recording(context_id=context_id, fps=30)
 
             if spec.before_all:
-                self._run_hook(page, spec.before_all.steps, "before_all", result)
+                await self._run_hook(context_id, spec.before_all.steps, "before_all", result)
 
             for i, step in enumerate(spec.steps):
                 if spec.before_each:
-                    self._run_hook(page, spec.before_each.steps, "before_each", result)
+                    await self._run_hook(context_id, spec.before_each.steps, "before_each", result)
 
-                step_result = self._execute_step(page, step, i, result)
+                step_result = await self._execute_step(context_id, step, i, result)
                 result.step_results.append(step_result)
 
                 match step_result.status:
@@ -256,15 +271,15 @@ class TestRunner:
                         result.passed_steps += 1
 
                 if spec.after_each:
-                    self._run_hook(page, spec.after_each.steps, "after_each", result)
+                    await self._run_hook(context_id, spec.after_each.steps, "after_each", result)
 
             if spec.after_all:
-                self._run_hook(page, spec.after_all.steps, "after_all", result)
+                await self._run_hook(context_id, spec.after_all.steps, "after_all", result)
 
             if self._record_video:
                 try:
-                    video_path = page.stop_video_recording()
-                    result.video_path = video_path
+                    video_result = await self._browser.stop_video_recording(context_id=context_id)
+                    result.video_path = video_result.get("path") if isinstance(video_result, dict) else None
                 except Exception as e:
                     self._log.warning("Failed to stop video recording", error=str(e))
 
@@ -273,9 +288,9 @@ class TestRunner:
             self._log.error("Test run failed with exception", error=str(e))
 
         finally:
-            if own_page:
+            if own_context:
                 with contextlib.suppress(Exception):
-                    page.close()
+                    await self._browser.close_context(context_id=context_id)
 
         result.finished_at = datetime.now(UTC)
         result.duration_ms = int(
@@ -300,15 +315,15 @@ class TestRunner:
             spec.versioning and spec.versioning.enabled
         )
         if versioning_enabled:
-            self._save_test_snapshot(spec, result, page if not own_page else None)
+            await self._save_test_snapshot(spec, result, context_id if not own_context else None)
 
         return result
 
-    def _save_test_snapshot(
+    async def _save_test_snapshot(
         self,
         spec: TestSpec,
         result: TestRunResult,
-        page: BrowserContext | None,
+        context_id: str | None,
     ) -> None:
         """Save a snapshot for versioned test tracking."""
         try:
@@ -330,11 +345,12 @@ class TestRunner:
                     config=versioning_config,
                 )
 
-            # Save the snapshot
+            # Save the snapshot (pass browser and context_id for SDK v2)
             snapshot = tracker.save_snapshot(
                 test_name=spec.name,
                 run_data=result,
-                page=page,
+                browser=self._browser if context_id else None,
+                context_id=context_id,
             )
 
             self._log.info(
@@ -350,7 +366,7 @@ class TestRunner:
                 error=str(e),
             )
 
-    def run_suite(
+    async def run_suite(
         self,
         suite: TestSuite,
         variables: dict[str, Any] | None = None,
@@ -364,6 +380,10 @@ class TestRunner:
 
         Returns:
             List of TestRunResult for each test
+
+        SDK v2 Notes:
+            - Creates separate context for each test
+            - Hooks run in dedicated contexts
         """
         results: list[TestRunResult] = []
         combined_vars = {**(variables or {}), **suite.variables}
@@ -376,23 +396,24 @@ class TestRunner:
         )
 
         if suite.before_suite:
-            page = self._browser.new_page()
+            ctx = await self._browser.create_context()
+            context_id = ctx["context_id"]
             try:
                 dummy_result = TestRunResult(
                     test_name="_suite_setup",
                     status=StepStatus.RUNNING,
                     started_at=datetime.now(UTC),
                 )
-                self._run_hook(page, suite.before_suite.steps, "before_suite", dummy_result)
+                await self._run_hook(context_id, suite.before_suite.steps, "before_suite", dummy_result)
             finally:
-                page.close()
+                await self._browser.close_context(context_id=context_id)
 
         if suite.parallel_execution:
-            results = self._run_parallel(suite, combined_vars)
+            results = await self._run_parallel(suite, combined_vars)
         else:
             for test in suite.tests:
                 test_vars = {**combined_vars, **test.variables}
-                result = self.run_spec(test, variables=test_vars)
+                result = await self.run_spec(test, variables=test_vars)
                 results.append(result)
 
                 if suite.fail_fast and result.status == StepStatus.FAILED:
@@ -400,16 +421,17 @@ class TestRunner:
                     break
 
         if suite.after_suite:
-            page = self._browser.new_page()
+            ctx = await self._browser.create_context()
+            context_id = ctx["context_id"]
             try:
                 dummy_result = TestRunResult(
                     test_name="_suite_teardown",
                     status=StepStatus.RUNNING,
                     started_at=datetime.now(UTC),
                 )
-                self._run_hook(page, suite.after_suite.steps, "after_suite", dummy_result)
+                await self._run_hook(context_id, suite.after_suite.steps, "after_suite", dummy_result)
             finally:
-                page.close()
+                await self._browser.close_context(context_id=context_id)
 
         passed = sum(1 for r in results if r.status == StepStatus.PASSED)
         failed = sum(1 for r in results if r.status == StepStatus.FAILED)
@@ -424,53 +446,47 @@ class TestRunner:
 
         return results
 
-    def _run_parallel(
+    async def _run_parallel(
         self,
         suite: TestSuite,
         variables: dict[str, Any],
     ) -> list[TestRunResult]:
-        """Run tests in parallel using asyncio."""
-        from concurrent.futures import ThreadPoolExecutor, as_completed
+        """
+        Run tests in parallel using asyncio.
 
-        results: list[TestRunResult] = []
-        max_workers = min(suite.max_parallel, len(suite.tests))
+        SDK v2 Notes:
+            - Each test runs in its own context
+            - asyncio.gather provides parallel execution
+            - Semaphore limits concurrent tests
+        """
+        max_concurrent = min(suite.max_parallel, len(suite.tests))
+        semaphore = asyncio.Semaphore(max_concurrent)
 
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_test = {
-                executor.submit(
-                    self.run_spec,
-                    test,
-                    variables={**variables, **test.variables},
-                ): test
-                for test in suite.tests
-            }
-
-            for future in as_completed(future_to_test):
-                test = future_to_test[future]
+        async def run_single_test(test: TestSpec) -> TestRunResult:
+            async with semaphore:
+                test_vars = {**variables, **test.variables}
                 try:
-                    result = future.result()
-                    results.append(result)
+                    return await self.run_spec(test, variables=test_vars)
                 except Exception as e:
                     self._log.error(
                         "Parallel test execution failed",
                         test=test.name,
                         error=str(e),
                     )
-                    results.append(
-                        TestRunResult(
-                            test_name=test.name,
-                            status=StepStatus.FAILED,
-                            started_at=datetime.now(UTC),
-                            finished_at=datetime.now(UTC),
-                            error=str(e),
-                        )
+                    return TestRunResult(
+                        test_name=test.name,
+                        status=StepStatus.FAILED,
+                        started_at=datetime.now(UTC),
+                        finished_at=datetime.now(UTC),
+                        error=str(e),
                     )
 
-        return results
+        tasks = [run_single_test(test) for test in suite.tests]
+        return list(await asyncio.gather(*tasks))
 
-    def _execute_step(
+    async def _execute_step(
         self,
-        page: BrowserContext,
+        context_id: str,
         step: TestStep,
         index: int,
         test_result: TestRunResult,
@@ -483,11 +499,16 @@ class TestRunner:
         2. Before element actions, verify we're on the expected page
         3. If element not found, try URL recovery before selector healing
         4. Log all recovery attempts for debugging
+
+        SDK v2 Notes:
+            - All browser operations are async
+            - Uses context_id instead of page object
+            - Browser methods: navigate, click, type_, etc.
         """
         step_name = step.name or f"Step {index + 1}"
         start_time = time.monotonic()
 
-        self._log.debug("Executing step", step=step_name, action=step.action)
+        self._log.debug("Executing step", step=step_name, action=step.action, context_id=context_id)
 
         # Check skip condition
         if step.skip_if and self._evaluate_condition(step.skip_if, test_result.variables):
@@ -526,20 +547,20 @@ class TestRunner:
                     and step.selector
                     and self._current_expected_url
                 ):
-                    self._verify_or_recover_url(page, self._current_expected_url)
+                    await self._verify_or_recover_url(context_id, self._current_expected_url)
 
                 # Smart pre-action waits for interaction actions
                 if step.action in self.INTERACTION_ACTIONS and step.selector:
-                    self._ensure_element_ready(page, step.selector, step.timeout)
+                    await self._ensure_element_ready(context_id, step.selector, step.timeout)
 
                 # Execute the browser command
-                result = self._execute_browser_command(
-                    page, method_name, args, step
+                result = await self._execute_browser_command(
+                    context_id, method_name, args, step
                 )
 
                 # Smart post-action waits for navigation actions
                 if self._wait_for_network_idle and step.action in self.NAVIGATION_ACTIONS:
-                    self._wait_for_stable_state(page)
+                    await self._wait_for_stable_state(context_id)
 
                 if step.capture_as:
                     test_result.variables[step.capture_as] = result
@@ -570,8 +591,8 @@ class TestRunner:
                     and self._current_expected_url
                 ):
                     url_recovery_attempted = True
-                    recovery_success = self._attempt_url_recovery(
-                        page,
+                    recovery_success = await self._attempt_url_recovery(
+                        context_id,
                         self._current_expected_url,
                         step_name,
                     )
@@ -585,14 +606,14 @@ class TestRunner:
                         )
                         try:
                             if step.action in self.INTERACTION_ACTIONS:
-                                self._ensure_element_ready(page, step.selector, step.timeout)
+                                await self._ensure_element_ready(context_id, step.selector, step.timeout)
 
-                            result = self._execute_browser_command(
-                                page, method_name, args, step
+                            result = await self._execute_browser_command(
+                                context_id, method_name, args, step
                             )
 
                             if self._wait_for_network_idle and step.action in self.NAVIGATION_ACTIONS:
-                                self._wait_for_stable_state(page)
+                                await self._wait_for_stable_state(context_id)
 
                             if step.capture_as:
                                 test_result.variables[step.capture_as] = result
@@ -619,8 +640,9 @@ class TestRunner:
                 # RECOVERY STRATEGY 2: Selector self-healing
                 # Attempt self-healing for element not found errors
                 if step.selector and self._is_element_not_found_error(e):
-                    healing_result = self._healing_engine.heal_selector(
-                        page,
+                    healing_result = await self._healing_engine.heal_selector_async(
+                        self._browser,
+                        context_id,
                         step.selector,
                         action_context=step.action,
                         element_description=step.description,
@@ -631,16 +653,16 @@ class TestRunner:
                         try:
                             # Re-check element readiness with healed selector
                             if step.action in self.INTERACTION_ACTIONS:
-                                self._ensure_element_ready(
-                                    page, healing_result.healed_selector, step.timeout
+                                await self._ensure_element_ready(
+                                    context_id, healing_result.healed_selector, step.timeout
                                 )
 
-                            result = self._execute_browser_command(
-                                page, method_name, args, step
+                            result = await self._execute_browser_command(
+                                context_id, method_name, args, step
                             )
 
                             if self._wait_for_network_idle and step.action in self.NAVIGATION_ACTIONS:
-                                self._wait_for_stable_state(page)
+                                await self._wait_for_stable_state(context_id)
 
                             if step.capture_as:
                                 test_result.variables[step.capture_as] = result
@@ -671,19 +693,19 @@ class TestRunner:
                         delay_ms=delay,
                         error=str(e),
                     )
-                    time.sleep(delay / 1000)
+                    await asyncio.sleep(delay / 1000)
 
         duration = int((time.monotonic() - start_time) * 1000)
 
         # Capture failure artifacts
         screenshot_path: str | None = None
         if self._screenshot_on_failure:
-            screenshot_path = self._capture_failure_screenshot(
-                page, test_result.test_name, index, test_result.artifacts
+            screenshot_path = await self._capture_failure_screenshot(
+                context_id, test_result.test_name, index, test_result.artifacts
             )
 
         if self._capture_network_on_failure:
-            network_log = self._capture_network_log(page, test_result)
+            network_log = await self._capture_network_log(context_id, test_result)
 
         return StepResult(
             step_index=index,
@@ -698,41 +720,70 @@ class TestRunner:
             network_log=network_log,
         )
 
-    def _ensure_element_ready(
+    async def _ensure_element_ready(
         self,
-        page: BrowserContext,
+        context_id: str,
         selector: str,
         timeout: int | None = None,
     ) -> None:
-        """Ensure element is visible and enabled before interaction."""
+        """
+        Ensure element is visible and enabled before interaction.
+
+        SDK v2 Notes:
+            - Uses wait_for_selector, is_visible, is_enabled async methods
+            - All methods require context_id parameter
+        """
         effective_timeout = timeout or self._default_timeout
 
         # Wait for selector to exist
         try:
-            page.wait_for_selector(selector, timeout=effective_timeout)
+            await self._browser.wait_for_selector(
+                context_id=context_id,
+                selector=selector,
+                timeout=effective_timeout,
+            )
         except Exception as e:
             raise ElementNotFoundError(f"Element not found: {selector}") from e
 
         # Check visibility if pre-action check is enabled
         if self._pre_action_visibility_check:
             try:
-                if not page.is_visible(selector):
+                visibility_result = await self._browser.is_visible(
+                    context_id=context_id,
+                    selector=selector,
+                )
+                is_visible = visibility_result.get("visible", False) if isinstance(visibility_result, dict) else bool(visibility_result)
+
+                if not is_visible:
                     # Element exists but not visible - scroll to it
                     try:
-                        page.scroll_to_element(selector)
-                        time.sleep(0.2)  # Brief wait for scroll
+                        await self._browser.scroll_to_element(
+                            context_id=context_id,
+                            selector=selector,
+                        )
+                        await asyncio.sleep(0.2)  # Brief wait for scroll
                     except Exception:
                         pass
 
                     # Re-check visibility
-                    if not page.is_visible(selector):
+                    visibility_result = await self._browser.is_visible(
+                        context_id=context_id,
+                        selector=selector,
+                    )
+                    is_visible = visibility_result.get("visible", False) if isinstance(visibility_result, dict) else bool(visibility_result)
+                    if not is_visible:
                         raise ElementNotInteractableError(
                             f"Element not visible: {selector}"
                         )
 
                 # Check if element is enabled (for interactive elements)
                 try:
-                    if not page.is_enabled(selector):
+                    enabled_result = await self._browser.is_enabled(
+                        context_id=context_id,
+                        selector=selector,
+                    )
+                    is_enabled = enabled_result.get("enabled", True) if isinstance(enabled_result, dict) else bool(enabled_result)
+                    if not is_enabled:
                         raise ElementNotInteractableError(
                             f"Element not enabled: {selector}"
                         )
@@ -746,19 +797,20 @@ class TestRunner:
                 # Visibility check failed but element exists, proceed anyway
                 pass
 
-    def _wait_for_stable_state(self, page: BrowserContext) -> None:
+    async def _wait_for_stable_state(self, context_id: str) -> None:
         """Wait for network idle and stable DOM state."""
         try:
-            page.wait_for_network_idle(
+            await self._browser.wait_for_network_idle(
+                context_id=context_id,
                 idle_time=500,
                 timeout=self._network_idle_timeout,
             )
         except Exception as e:
             self._log.debug("Network idle wait timed out", error=str(e))
 
-    def _verify_or_recover_url(
+    async def _verify_or_recover_url(
         self,
-        page: BrowserContext,
+        context_id: str,
         expected_url: str,
     ) -> None:
         """
@@ -768,12 +820,13 @@ class TestRunner:
         we're on the correct page. Does NOT raise on recovery failure -
         that will be caught when the element interaction fails.
 
-        Args:
-            page: Browser context
-            expected_url: Expected URL (full URL or path)
+        SDK v2 Notes:
+            - Uses get_page_info to get current URL
+            - Uses navigate method instead of goto
         """
         try:
-            current_url = page.get_current_url()
+            page_info = await self._browser.get_page_info(context_id=context_id)
+            current_url = page_info.get("url") if isinstance(page_info, dict) else None
             if not current_url:
                 return
 
@@ -794,8 +847,13 @@ class TestRunner:
                     expected_path=expected_path,
                 )
                 # Navigate to expected URL
-                page.goto(expected_url, wait_until="domcontentloaded", timeout=10000)
-                self._wait_for_stable_state(page)
+                await self._browser.navigate(
+                    context_id=context_id,
+                    url=expected_url,
+                    wait_until="domcontentloaded",
+                    timeout=10000,
+                )
+                await self._wait_for_stable_state(context_id)
 
         except Exception as e:
             self._log.warning(
@@ -804,9 +862,9 @@ class TestRunner:
                 error=str(e),
             )
 
-    def _attempt_url_recovery(
+    async def _attempt_url_recovery(
         self,
-        page: BrowserContext,
+        context_id: str,
         expected_url: str,
         step_name: str,
     ) -> bool:
@@ -817,8 +875,12 @@ class TestRunner:
         This handles the case where the browser ended up on a different page
         (e.g., due to a redirect, timeout, or prior navigation failure).
 
+        SDK v2 Notes:
+            - Uses navigate method instead of goto
+            - Uses get_page_info to verify URL
+
         Args:
-            page: Browser context
+            context_id: Browser context ID
             expected_url: URL where the element should exist
             step_name: Name of the step (for logging)
 
@@ -826,7 +888,8 @@ class TestRunner:
             True if recovery navigation succeeded, False otherwise
         """
         try:
-            current_url = page.get_current_url() or "unknown"
+            page_info = await self._browser.get_page_info(context_id=context_id)
+            current_url = page_info.get("url", "unknown") if isinstance(page_info, dict) else "unknown"
             self._log.info(
                 "Attempting URL recovery",
                 step=step_name,
@@ -835,13 +898,19 @@ class TestRunner:
             )
 
             # Navigate to expected URL
-            page.goto(expected_url, wait_until="domcontentloaded", timeout=10000)
+            await self._browser.navigate(
+                context_id=context_id,
+                url=expected_url,
+                wait_until="domcontentloaded",
+                timeout=10000,
+            )
 
             # Wait for page to stabilize
-            self._wait_for_stable_state(page)
+            await self._wait_for_stable_state(context_id)
 
             # Verify navigation succeeded
-            new_url = page.get_current_url() or ""
+            page_info = await self._browser.get_page_info(context_id=context_id)
+            new_url = page_info.get("url", "") if isinstance(page_info, dict) else ""
             expected_path = urlparse(expected_url).path.rstrip("/") or "/"
             new_path = urlparse(new_url).path.rstrip("/") or "/"
 
@@ -879,14 +948,20 @@ class TestRunner:
         jitter = random.randint(0, int(delay * 0.1))
         return delay + jitter
 
-    def _capture_failure_screenshot(
+    async def _capture_failure_screenshot(
         self,
-        page: BrowserContext,
+        context_id: str,
         test_name: str,
         step_index: int,
         artifacts: dict[str, str],
     ) -> str | None:
-        """Capture screenshot on failure."""
+        """
+        Capture screenshot on failure.
+
+        SDK v2 Notes:
+            - Uses screenshot method with context_id
+            - Returns path or saves to specified location
+        """
         try:
             # Sanitize test name for filename
             safe_name = re.sub(r"[^\w\-_]", "_", test_name)
@@ -894,7 +969,7 @@ class TestRunner:
             screenshot_path = str(
                 self._artifact_dir / f"failure_{safe_name}_{step_index}_{timestamp}.png"
             )
-            page.screenshot(screenshot_path)
+            await self._browser.screenshot(context_id=context_id, path=screenshot_path)
             artifacts[f"failure_screenshot_{step_index}"] = screenshot_path
             self._log.info("Captured failure screenshot", path=screenshot_path)
             return screenshot_path
@@ -902,14 +977,20 @@ class TestRunner:
             self._log.warning("Failed to capture failure screenshot", error=str(ss_error))
             return None
 
-    def _capture_network_log(
+    async def _capture_network_log(
         self,
-        page: BrowserContext,
+        context_id: str,
         test_result: TestRunResult,
     ) -> list[dict[str, Any]] | None:
-        """Capture network log for debugging."""
+        """
+        Capture network log for debugging.
+
+        SDK v2 Notes:
+            - Uses get_network_log with context_id
+        """
         try:
-            network_log = page.get_network_log()
+            network_log_result = await self._browser.get_network_log(context_id=context_id)
+            network_log = network_log_result.get("entries", []) if isinstance(network_log_result, dict) else []
             test_result.network_log = network_log
             self._log.debug("Captured network log", entries=len(network_log))
             return network_log
@@ -917,80 +998,110 @@ class TestRunner:
             self._log.debug("Failed to capture network log", error=str(e))
             return None
 
-    def _execute_browser_command(
+    async def _execute_browser_command(
         self,
-        page: BrowserContext,
+        context_id: str,
         method_name: str,
         args: dict[str, Any],
         step: TestStep,
     ) -> Any:
-        """Execute a browser command."""
+        """
+        Execute a browser command.
+
+        SDK v2 Notes:
+            - All browser methods are async
+            - Method names map to OwlBrowser methods
+            - context_id is always passed
+            - Method names: goto -> navigate, type -> type_
+        """
         if method_name.startswith("_assert"):
-            return self._execute_assertion(page, method_name, args, step)
+            return await self._execute_assertion(context_id, method_name, args, step)
 
-        method = getattr(page, method_name, None)
+        # Map old method names to SDK v2 method names
+        method_map = {
+            "goto": "navigate",
+            "type": "type_",
+            "get_current_url": "get_page_info",  # Extract url from result
+        }
+        actual_method_name = method_map.get(method_name, method_name)
+
+        method = getattr(self._browser, actual_method_name, None)
         if method is None:
-            raise ValueError(f"Unknown browser method: {method_name}")
+            raise ValueError(f"Unknown browser method: {method_name} (mapped to: {actual_method_name})")
 
-        return method(**args)
+        # Add context_id to args
+        args_with_context = {"context_id": context_id, **args}
+        result = await method(**args_with_context)
 
-    def _execute_assertion(
+        # Special handling for get_page_info when called as get_current_url
+        if method_name == "get_current_url" and isinstance(result, dict):
+            return result.get("url")
+
+        return result
+
+    async def _execute_assertion(
         self,
-        page: BrowserContext,
+        context_id: str,
         method_name: str,
         args: dict[str, Any],
         step: TestStep,
     ) -> bool:
-        """Execute an assertion step."""
+        """
+        Execute an assertion step.
+
+        SDK v2 Notes:
+            - AssertionEngine takes browser and context_id
+            - All assertions are async
+        """
         from autoqa.assertions.engine import AssertionEngine
 
-        engine = AssertionEngine(page)
+        engine = AssertionEngine(self._browser, context_id)
 
         match method_name:
             case "_assert_element":
-                return engine.assert_element(args["config"])
+                return await engine.assert_element(args["config"])
             case "_assert_visual":
-                return engine.assert_visual(args["config"], self._artifact_dir)
+                return await engine.assert_visual(args["config"], self._artifact_dir)
             case "_assert_network":
-                return engine.assert_network(args["config"])
+                return await engine.assert_network(args["config"])
             case "_assert_url":
-                return engine.assert_url(
+                return await engine.assert_url(
                     args["url_pattern"],
                     is_regex=args.get("is_regex", False),
                 )
             case "_assert_custom":
-                return engine.assert_custom(args["config"])
+                return await engine.assert_custom(args["config"])
             # ML-based assertions
             case "_assert_ml":
-                return engine.assert_ml(args["config"])
+                return await engine.assert_ml(args["config"])
             case "_assert_ocr":
-                return engine.assert_ocr(args["config"])
+                return await engine.assert_ocr(args["config"])
             case "_assert_ui_state":
-                return engine.assert_ui_state(args["config"])
+                return await engine.assert_ui_state(args["config"])
             case "_assert_color":
-                return engine.assert_color(args["config"])
+                return await engine.assert_color(args["config"])
             case "_assert_layout":
-                return engine.assert_layout(args["config"])
+                return await engine.assert_layout(args["config"])
             case "_assert_icon":
-                return engine.assert_icon(args["config"])
+                return await engine.assert_icon(args["config"])
             case "_assert_accessibility":
-                return engine.assert_accessibility(args["config"])
+                return await engine.assert_accessibility(args["config"])
             # LLM-based assertions
             case "_assert_llm" | "_assert_semantic" | "_assert_content":
-                return self._execute_llm_assertion(page, method_name, args)
+                return await self._execute_llm_assertion(context_id, method_name, args)
             case _:
                 raise ValueError(f"Unknown assertion type: {method_name}")
 
-    def _run_hook(
+    async def _run_hook(
         self,
-        page: BrowserContext,
+        context_id: str,
         steps: list[TestStep],
         hook_name: str,
         result: TestRunResult,
     ) -> None:
         """Run a lifecycle hook."""
         for i, step in enumerate(steps):
-            step_result = self._execute_step(page, step, i, result)
+            step_result = await self._execute_step(context_id, step, i, result)
             if step_result.status == StepStatus.FAILED:
                 self._log.warning(
                     "Hook step failed",
@@ -1057,24 +1168,23 @@ class TestRunner:
         ]
         return any(indicator in error_str for indicator in indicators)
 
-    def _execute_llm_assertion(
+    async def _execute_llm_assertion(
         self,
-        page: BrowserContext,
+        context_id: str,
         method_name: str,
         args: dict[str, Any],
     ) -> bool:
         """
         Execute an LLM-based assertion.
 
-        Uses asyncio to run the async LLM assertion engine.
-        Falls back gracefully when LLM is disabled.
+        SDK v2 Notes:
+            - Already in async context, no need for asyncio.run
+            - LLMAssertionEngine takes browser and context_id
         """
-        import asyncio
-
         from autoqa.llm.assertions import LLMAssertionEngine, LLMAssertionError
 
-        async def run_assertion() -> bool:
-            engine = LLMAssertionEngine(page)
+        try:
+            engine = LLMAssertionEngine(self._browser, context_id)
 
             match method_name:
                 case "_assert_llm":
@@ -1110,18 +1220,6 @@ class TestRunner:
 
                 case _:
                     raise ValueError(f"Unknown LLM assertion type: {method_name}")
-
-        try:
-            # Run the async assertion
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # If we're already in an async context, create a new task
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(asyncio.run, run_assertion())
-                    return future.result(timeout=60)
-            else:
-                return asyncio.run(run_assertion())
 
         except LLMAssertionError:
             raise

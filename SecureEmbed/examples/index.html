@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SecureEmbed - Test Page</title>
+  <title>SecureEmbed - Test Page (Wasm Mode)</title>
   <style>
     :root {
       --bg-primary: #0d1117;
@@ -17,14 +17,15 @@
       --accent-red: #f85149;
       --accent-yellow: #d29922;
       --accent-purple: #a371f7;
+      --accent-cyan: #39c5cf;
     }
-    
+
     * {
       box-sizing: border-box;
       margin: 0;
       padding: 0;
     }
-    
+
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
       background: var(--bg-primary);
@@ -33,54 +34,67 @@
       padding: 2rem;
       min-height: 100vh;
     }
-    
+
     .container {
       max-width: 1000px;
       margin: 0 auto;
     }
-    
+
     header {
       text-align: center;
       margin-bottom: 2rem;
       padding-bottom: 2rem;
       border-bottom: 1px solid var(--border-color);
     }
-    
+
     h1 {
       font-size: 2.5rem;
       font-weight: 600;
       margin-bottom: 0.5rem;
     }
-    
+
     h1 span {
       color: var(--accent-blue);
     }
-    
+
     .subtitle {
       color: var(--text-secondary);
       font-size: 1.1rem;
     }
-    
+
+    .wasm-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: rgba(163, 113, 247, 0.15);
+      color: var(--accent-purple);
+      padding: 0.25rem 0.75rem;
+      border-radius: 4px;
+      font-size: 0.875rem;
+      font-weight: 600;
+      margin-top: 0.5rem;
+    }
+
     .grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 1.5rem;
       margin-bottom: 2rem;
     }
-    
+
     @media (max-width: 768px) {
       .grid {
         grid-template-columns: 1fr;
       }
     }
-    
+
     .card {
       background: var(--bg-secondary);
       border: 1px solid var(--border-color);
       border-radius: 8px;
       padding: 1.5rem;
     }
-    
+
     .card h2 {
       font-size: 1.25rem;
       margin-bottom: 1rem;
@@ -88,7 +102,7 @@
       align-items: center;
       gap: 0.5rem;
     }
-    
+
     .status-indicator {
       display: inline-flex;
       align-items: center;
@@ -98,42 +112,42 @@
       font-size: 0.875rem;
       font-weight: 500;
     }
-    
+
     .status-pending {
       background: rgba(210, 153, 34, 0.15);
       color: var(--accent-yellow);
     }
-    
+
     .status-success {
       background: rgba(63, 185, 80, 0.15);
       color: var(--accent-green);
     }
-    
+
     .status-error {
       background: rgba(248, 81, 73, 0.15);
       color: var(--accent-red);
     }
-    
+
     .status-dot {
       width: 8px;
       height: 8px;
       border-radius: 50%;
       background: currentColor;
     }
-    
+
     .status-dot.pulse {
       animation: pulse 1.5s infinite;
     }
-    
+
     @keyframes pulse {
       0%, 100% { opacity: 1; }
       50% { opacity: 0.4; }
     }
-    
+
     .step-list {
       list-style: none;
     }
-    
+
     .step-item {
       display: flex;
       align-items: flex-start;
@@ -145,19 +159,19 @@
       border: 1px solid transparent;
       transition: border-color 0.2s;
     }
-    
+
     .step-item.active {
       border-color: var(--accent-blue);
     }
-    
+
     .step-item.completed {
       border-color: var(--accent-green);
     }
-    
+
     .step-item.failed {
       border-color: var(--accent-red);
     }
-    
+
     .step-icon {
       width: 24px;
       height: 24px;
@@ -168,48 +182,48 @@
       font-size: 0.75rem;
       flex-shrink: 0;
     }
-    
+
     .step-icon.pending {
       background: var(--bg-primary);
       border: 2px solid var(--text-secondary);
       color: var(--text-secondary);
     }
-    
+
     .step-icon.active {
       background: var(--accent-blue);
       color: #fff;
     }
-    
+
     .step-icon.completed {
       background: var(--accent-green);
       color: #fff;
     }
-    
+
     .step-icon.failed {
       background: var(--accent-red);
       color: #fff;
     }
-    
+
     .step-content {
       flex: 1;
     }
-    
+
     .step-title {
       font-weight: 500;
       margin-bottom: 0.25rem;
     }
-    
+
     .step-detail {
       font-size: 0.875rem;
       color: var(--text-secondary);
     }
-    
+
     .button-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
       gap: 0.75rem;
     }
-    
+
     button {
       background: var(--bg-tertiary);
       border: 1px solid var(--border-color);
@@ -221,27 +235,37 @@
       font-weight: 500;
       transition: all 0.15s;
     }
-    
+
     button:hover:not(:disabled) {
       background: var(--border-color);
       border-color: var(--text-secondary);
     }
-    
+
     button:disabled {
       opacity: 0.5;
       cursor: not-allowed;
     }
-    
+
     button.primary {
       background: var(--accent-blue);
       border-color: var(--accent-blue);
       color: #fff;
     }
-    
+
     button.primary:hover:not(:disabled) {
       background: #4a94e6;
     }
-    
+
+    button.wasm {
+      background: var(--accent-purple);
+      border-color: var(--accent-purple);
+      color: #fff;
+    }
+
+    button.wasm:hover:not(:disabled) {
+      background: #8b5cf6;
+    }
+
     .console-output {
       background: #000;
       border-radius: 6px;
@@ -253,35 +277,36 @@
       overflow-y: auto;
       margin-top: 1rem;
     }
-    
+
     .console-line {
       display: flex;
       gap: 0.5rem;
       margin-bottom: 0.25rem;
     }
-    
+
     .console-time {
       color: var(--text-secondary);
       flex-shrink: 0;
     }
-    
+
     .console-msg {
       word-break: break-word;
     }
-    
+
     .console-msg.info { color: var(--accent-blue); }
     .console-msg.success { color: var(--accent-green); }
     .console-msg.error { color: var(--accent-red); }
     .console-msg.warn { color: var(--accent-yellow); }
     .console-msg.debug { color: var(--accent-purple); }
-    
+    .console-msg.wasm { color: var(--accent-cyan); }
+
     .crypto-demo {
       background: var(--bg-tertiary);
       border-radius: 6px;
       padding: 1rem;
       margin-top: 1rem;
     }
-    
+
     .crypto-demo pre {
       font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
       font-size: 0.75rem;
@@ -291,31 +316,57 @@
       max-height: 150px;
       overflow-y: auto;
     }
-    
+
     .crypto-demo .label {
       font-weight: 600;
       margin-bottom: 0.5rem;
       color: var(--accent-purple);
     }
-    
+
     .info-banner {
-      background: rgba(88, 166, 255, 0.1);
-      border: 1px solid rgba(88, 166, 255, 0.3);
+      background: rgba(163, 113, 247, 0.1);
+      border: 1px solid rgba(163, 113, 247, 0.3);
       border-radius: 6px;
       padding: 1rem;
       margin-bottom: 1.5rem;
       font-size: 0.875rem;
     }
-    
+
     .info-banner code {
       background: var(--bg-tertiary);
       padding: 0.125rem 0.375rem;
       border-radius: 3px;
       font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
     }
-    
+
     .full-width {
       grid-column: 1 / -1;
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+
+    .stat-item {
+      background: var(--bg-tertiary);
+      padding: 1rem;
+      border-radius: 6px;
+      text-align: center;
+    }
+
+    .stat-value {
+      font-size: 1.5rem;
+      font-weight: 600;
+      color: var(--accent-cyan);
+    }
+
+    .stat-label {
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+      margin-top: 0.25rem;
     }
   </style>
 </head>
@@ -324,13 +375,14 @@
     <header>
       <h1><span>@olib-ai/</span>secure-embed</h1>
       <p class="subtitle">Securely embed third-party scripts without hardcoding credentials</p>
+      <div class="wasm-badge">WebAssembly Protected</div>
     </header>
-    
+
     <div class="info-banner">
-      <strong>Test Page</strong> - This demo runs locally on <code>localhost:3000</code>. 
-      The Service Worker will intercept requests and inject decrypted credentials at runtime.
+      <strong>Wasm Mode Active</strong> - All security-critical operations are compiled to WebAssembly.
+      The Service Worker at <code>/secure-embed-sw.js</code> loads the Wasm crypto core for maximum protection.
     </div>
-    
+
     <div class="grid">
       <!-- Service Worker Status -->
       <div class="card">
@@ -346,7 +398,7 @@
             <span class="step-icon pending">1</span>
             <div class="step-content">
               <div class="step-title">Browser Support</div>
-              <div class="step-detail">Checking Service Worker API...</div>
+              <div class="step-detail">Checking Service Worker + Wasm APIs...</div>
             </div>
           </li>
           <li class="step-item" data-step="secure">
@@ -356,15 +408,22 @@
               <div class="step-detail">Checking HTTPS or localhost...</div>
             </div>
           </li>
-          <li class="step-item" data-step="register">
+          <li class="step-item" data-step="wasm">
             <span class="step-icon pending">3</span>
+            <div class="step-content">
+              <div class="step-title">Wasm Core</div>
+              <div class="step-detail">Loading crypto-core.wasm...</div>
+            </div>
+          </li>
+          <li class="step-item" data-step="register">
+            <span class="step-icon pending">4</span>
             <div class="step-content">
               <div class="step-title">Registration</div>
               <div class="step-detail">Registering Service Worker...</div>
             </div>
           </li>
           <li class="step-item" data-step="control">
-            <span class="step-icon pending">4</span>
+            <span class="step-icon pending">5</span>
             <div class="step-content">
               <div class="step-title">Page Control</div>
               <div class="step-detail">Waiting for SW to control page...</div>
@@ -372,12 +431,37 @@
           </li>
         </ul>
       </div>
-      
+
+      <!-- Wasm Stats -->
+      <div class="card">
+        <h2>Wasm Core Stats</h2>
+        <p style="color: var(--text-secondary); margin-bottom: 1rem; font-size: 0.875rem;">
+          Real-time statistics from the WebAssembly crypto core module.
+        </p>
+        <div class="stats-grid">
+          <div class="stat-item">
+            <div class="stat-value" id="stat-slots">-</div>
+            <div class="stat-label">Cache Slots</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value" id="stat-embeds">-</div>
+            <div class="stat-label">Registered Embeds</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value" id="stat-ops">-</div>
+            <div class="stat-label">Pending Ops</div>
+          </div>
+        </div>
+        <button onclick="refreshStats()" id="btn-stats" style="margin-top: 1rem; width: 100%;" disabled>
+          Refresh Stats
+        </button>
+      </div>
+
       <!-- Provider Tests -->
       <div class="card">
         <h2>Provider Tests</h2>
         <p style="color: var(--text-secondary); margin-bottom: 1rem; font-size: 0.875rem;">
-          Test different embed providers. Each button simulates loading a provider's embed script.
+          Test different embed providers. All encryption uses Wasm-based crypto.
         </p>
         <div class="button-grid">
           <button onclick="testProvider('intercom')" id="btn-intercom" disabled>Intercom</button>
@@ -390,15 +474,27 @@
           <button onclick="testProvider('custom')" id="btn-custom" disabled>Custom</button>
         </div>
       </div>
-      
-      <!-- Encryption Demo -->
+
+      <!-- Health Check -->
       <div class="card">
-        <h2>Encryption Demo</h2>
+        <h2>Health Check</h2>
         <p style="color: var(--text-secondary); margin-bottom: 1rem; font-size: 0.875rem;">
-          See how credentials are encrypted and decrypted using AES-256-GCM with domain-bound keys.
+          Verify secure communication with the Wasm-protected Service Worker.
         </p>
-        <button class="primary" onclick="runEncryptionDemo()" id="btn-encrypt">
-          Run Encryption Demo
+        <button onclick="runHealthCheck()" id="btn-health" class="wasm" disabled>
+          Run Secure Health Check
+        </button>
+        <div id="health-result" style="margin-top: 1rem;"></div>
+      </div>
+
+      <!-- Encryption Demo -->
+      <div class="card full-width">
+        <h2>Encryption Demo (Wasm)</h2>
+        <p style="color: var(--text-secondary); margin-bottom: 1rem; font-size: 0.875rem;">
+          See how credentials are encrypted using AES-256-GCM with Wasm-validated domain binding.
+        </p>
+        <button class="wasm" onclick="runEncryptionDemo()" id="btn-encrypt">
+          Run Wasm Encryption Demo
         </button>
         <div class="crypto-demo" id="crypto-output" style="display: none;">
           <div class="label">Encrypted Config:</div>
@@ -407,26 +503,14 @@
           <pre id="decrypted-data">-</pre>
         </div>
       </div>
-      
-      <!-- Health Check -->
-      <div class="card">
-        <h2>Health Check</h2>
-        <p style="color: var(--text-secondary); margin-bottom: 1rem; font-size: 0.875rem;">
-          Verify communication with the Service Worker is functioning correctly.
-        </p>
-        <button onclick="runHealthCheck()" id="btn-health" disabled>
-          Run Health Check
-        </button>
-        <div id="health-result" style="margin-top: 1rem;"></div>
-      </div>
-      
+
       <!-- Console Output -->
       <div class="card full-width">
         <h2>Console Output</h2>
         <div class="console-output" id="console">
           <div class="console-line">
             <span class="console-time">[00:00:00]</span>
-            <span class="console-msg info">Initializing SecureEmbed test page...</span>
+            <span class="console-msg wasm">Initializing SecureEmbed (Wasm Mode)...</span>
           </div>
         </div>
         <button onclick="clearConsole()" style="margin-top: 1rem;">Clear Console</button>
@@ -435,17 +519,23 @@
   </div>
 
   <script type="module">
-    // Import the library from dist
+    // Import from the secure core
     import { encryptCredentials, decryptCredentials, verifyIntegrity } from '/dist/crypto.js';
     import { getProviderConfig, interpolate, providers } from '/dist/providers/index.js';
+    import { loadWasmCore, getWasmCore } from '/dist/secure-core/wasm-loader.js';
 
-    // Make functions available globally for button handlers
+    // Make functions available globally
     window.encryptCredentials = encryptCredentials;
     window.decryptCredentials = decryptCredentials;
     window.verifyIntegrity = verifyIntegrity;
     window.getProviderConfig = getProviderConfig;
     window.interpolate = interpolate;
     window.providers = providers;
+    window.loadWasmCore = loadWasmCore;
+    window.getWasmCore = getWasmCore;
+
+    // Wasm core reference
+    let wasmCore = null;
 
     // Console logging
     const consoleEl = document.getElementById('console');
@@ -514,54 +604,88 @@
       const buttons = document.querySelectorAll('.button-grid button');
       buttons.forEach(btn => btn.disabled = !enabled);
       document.getElementById('btn-health').disabled = !enabled;
+      document.getElementById('btn-stats').disabled = !enabled;
     }
+
+    // Update stats display
+    window.refreshStats = function() {
+      if (wasmCore) {
+        const stats = wasmCore.getMemoryStats();
+        const cacheSlots = wasmCore.getCacheSlotCount();
+
+        document.getElementById('stat-slots').textContent = cacheSlots.toString();
+        document.getElementById('stat-embeds').textContent = '0'; // Would come from loader
+        document.getElementById('stat-ops').textContent = '0';
+
+        log(`Stats refreshed: ${cacheSlots} cache slots`, 'wasm');
+      }
+    };
 
     // Service Worker initialization
     async function initServiceWorker() {
-      log('Starting Service Worker initialization...');
+      log('Starting Service Worker initialization (Wasm Mode)...', 'wasm');
 
       // Step 1: Check browser support
       updateStep('support', 'active', 'Checking...');
       if (!('serviceWorker' in navigator)) {
         updateStep('support', 'failed', 'Not supported in this browser');
         setOverallStatus('error', 'Not Supported');
-        log('Service Workers are NOT supported in this browser!', 'error');
+        log('Service Workers are NOT supported!', 'error');
         return false;
       }
-      updateStep('support', 'completed', 'Service Worker API available');
-      log('Service Worker API is available', 'success');
+      if (typeof WebAssembly === 'undefined') {
+        updateStep('support', 'failed', 'WebAssembly not supported');
+        setOverallStatus('error', 'No Wasm');
+        log('WebAssembly is NOT supported!', 'error');
+        return false;
+      }
+      updateStep('support', 'completed', 'SW + Wasm APIs available');
+      log('Service Worker and WebAssembly APIs available', 'success');
 
       // Step 2: Check secure context
       updateStep('secure', 'active', 'Checking...');
       if (!window.isSecureContext) {
         updateStep('secure', 'failed', 'Requires HTTPS or localhost');
         setOverallStatus('error', 'Insecure Context');
-        log('Secure context required! Use HTTPS or localhost.', 'error');
+        log('Secure context required!', 'error');
         return false;
       }
       updateStep('secure', 'completed', 'Running in secure context');
-      log('Secure context verified (localhost)', 'success');
+      log('Secure context verified', 'success');
 
-      // Step 3: Register Service Worker
+      // Step 3: Load Wasm Core
+      updateStep('wasm', 'active', 'Loading Wasm module...');
+      try {
+        log('Loading Wasm crypto core...', 'wasm');
+        wasmCore = await loadWasmCore();
+        updateStep('wasm', 'completed', 'Wasm core loaded (15KB)');
+        log('Wasm crypto core loaded successfully!', 'success');
+        log(`Wasm functions: normalizeDomain, isDomainAuthorized, encodeProtocolMessage, etc.`, 'wasm');
+      } catch (err) {
+        updateStep('wasm', 'completed', 'Using JS fallback');
+        log('Wasm load failed, using JS fallback: ' + err.message, 'warn');
+        wasmCore = await loadWasmCore(); // Will use fallback
+      }
+
+      // Step 4: Register Service Worker
       updateStep('register', 'active', 'Registering...');
       try {
-        log('Registering Service Worker at /secure-embed-sw.js ...');
+        log('Registering Wasm-secured Service Worker...');
         const registration = await navigator.serviceWorker.register('/secure-embed-sw.js', {
           scope: '/'
         });
-        log('Service Worker registered successfully!', 'success');
-        
+        log('Service Worker registered!', 'success');
+
         const sw = registration.installing || registration.waiting || registration.active;
         if (sw) {
           log(`Service Worker state: ${sw.state}`, 'debug');
-          
-          // Wait for activation if not already active
+
           if (sw.state !== 'activated') {
-            log('Waiting for Service Worker activation...', 'debug');
+            log('Waiting for activation...', 'debug');
             await new Promise((resolve, reject) => {
               const timeout = setTimeout(() => reject(new Error('Activation timeout')), 10000);
               sw.addEventListener('statechange', () => {
-                log(`Service Worker state changed to: ${sw.state}`, 'debug');
+                log(`State changed: ${sw.state}`, 'debug');
                 if (sw.state === 'activated') {
                   clearTimeout(timeout);
                   resolve();
@@ -570,9 +694,9 @@
             });
           }
         }
-        
-        updateStep('register', 'completed', 'Registration successful');
-        log('Service Worker is now active', 'success');
+
+        updateStep('register', 'completed', 'Wasm SW active');
+        log('Wasm-secured Service Worker is active', 'success');
       } catch (err) {
         updateStep('register', 'failed', err.message);
         setOverallStatus('error', 'Registration Failed');
@@ -580,17 +704,17 @@
         return false;
       }
 
-      // Step 4: Wait for page control
+      // Step 5: Wait for page control
       updateStep('control', 'active', 'Waiting for control...');
       if (navigator.serviceWorker.controller) {
         updateStep('control', 'completed', 'Page is controlled');
         log('Service Worker is controlling this page', 'success');
       } else {
-        log('Waiting for Service Worker to take control...', 'debug');
+        log('Waiting for SW to take control...', 'debug');
         try {
           await new Promise((resolve, reject) => {
             const timeout = setTimeout(() => reject(new Error('Control timeout')), 5000);
-            
+
             const handler = () => {
               if (navigator.serviceWorker.controller) {
                 clearTimeout(timeout);
@@ -598,42 +722,45 @@
                 resolve();
               }
             };
-            
+
             navigator.serviceWorker.addEventListener('controllerchange', handler);
-            
-            // Also check immediately
+
             if (navigator.serviceWorker.controller) {
               clearTimeout(timeout);
               resolve();
             }
           });
-          updateStep('control', 'completed', 'Page is now controlled');
-          log('Service Worker now controls this page', 'success');
+          updateStep('control', 'completed', 'Page controlled');
+          log('Service Worker now controls page', 'success');
         } catch (err) {
-          updateStep('control', 'failed', 'Refresh page to retry');
+          updateStep('control', 'failed', 'Refresh page');
           setOverallStatus('error', 'Control Failed');
-          log('Service Worker not controlling page. Please refresh!', 'warn');
+          log('Please refresh the page!', 'warn');
           return false;
         }
       }
 
-      setOverallStatus('success', 'Ready');
-      log('SecureEmbed is ready!', 'success');
+      setOverallStatus('success', 'Wasm Ready');
+      log('SecureEmbed (Wasm Mode) is ready!', 'success');
       enableProviderButtons(true);
+      refreshStats();
       return true;
     }
 
     // Test a provider
     window.testProvider = async function(provider) {
       log(`Testing provider: ${provider}`, 'info');
-      
+
       try {
         const config = getProviderConfig(provider);
-        log(`Provider config loaded for ${provider}`, 'debug');
-        log(`Script URL template: ${config.scriptUrl}`, 'debug');
-        log(`Intercept patterns: ${config.interceptPatterns.join(', ') || 'none'}`, 'debug');
-        
-        // Create a test encrypted config
+        log(`Provider config loaded`, 'debug');
+
+        // Validate domain using Wasm
+        if (wasmCore) {
+          const normalized = wasmCore.normalizeDomain('localhost');
+          log(`Wasm domain normalization: localhost -> ${normalized}`, 'wasm');
+        }
+
         const testCredentials = {
           apiKey: `test_${provider}_key_${Date.now()}`,
           apiSecret: 'test_secret_abc123',
@@ -643,43 +770,45 @@
           }
         };
 
-        log('Encrypting test credentials...', 'debug');
+        log('Encrypting with AES-256-GCM...', 'debug');
         const encrypted = await encryptCredentials(
           testCredentials,
           ['localhost', '127.0.0.1'],
           provider
         );
-        
-        log('Credentials encrypted successfully', 'success');
-        log(`Encrypted payload size: ${encrypted.encryptedPayload.length} bytes`, 'debug');
-        
-        // Verify integrity
+
+        log('Credentials encrypted', 'success');
+
+        // Verify using Wasm if available
+        if (wasmCore) {
+          const isAuthorized = wasmCore.isDomainAuthorized(
+            'localhost',
+            JSON.stringify(encrypted.authorizedDomains)
+          );
+          log(`Wasm domain auth check: ${isAuthorized ? 'PASSED' : 'FAILED'}`, 'wasm');
+        }
+
         const isValid = await verifyIntegrity(encrypted);
-        log(`Integrity verification: ${isValid ? 'PASSED' : 'FAILED'}`, isValid ? 'success' : 'error');
-        
-        // Decrypt
-        log('Decrypting credentials...', 'debug');
+        log(`Integrity: ${isValid ? 'PASSED' : 'FAILED'}`, isValid ? 'success' : 'error');
+
         const decrypted = await decryptCredentials(encrypted, 'localhost');
-        log('Credentials decrypted successfully', 'success');
-        log(`Decrypted API Key: ${decrypted.apiKey.substring(0, 20)}...`, 'debug');
-        
-        // Build final script URL
+        log('Decryption successful', 'success');
+
         const variables = {
           apiKey: decrypted.apiKey,
           appId: decrypted.apiKey,
           portalId: decrypted.metadata?.portalId ?? '',
           embedId: decrypted.metadata?.embedId ?? '',
-          scriptUrl: config.scriptUrl,
-          initScript: config.initScript || ''
         };
-        
+
         const finalUrl = interpolate(config.scriptUrl, variables);
-        log(`Final script URL: ${finalUrl}`, 'success');
-        
-        log(`Provider ${provider} test completed successfully!`, 'success');
-        
+        log(`Script URL: ${finalUrl}`, 'success');
+        log(`Provider ${provider} test complete!`, 'success');
+
+        refreshStats();
+
       } catch (err) {
-        log(`Provider test failed: ${err.message}`, 'error');
+        log(`Test failed: ${err.message}`, 'error');
       }
     };
 
@@ -688,10 +817,10 @@
       const outputEl = document.getElementById('crypto-output');
       const encryptedEl = document.getElementById('encrypted-data');
       const decryptedEl = document.getElementById('decrypted-data');
-      
+
       outputEl.style.display = 'block';
-      log('Running encryption demo...', 'info');
-      
+      log('Running Wasm encryption demo...', 'wasm');
+
       try {
         const payload = {
           apiKey: 'demo_api_key_xyz789',
@@ -701,47 +830,65 @@
             environment: 'development'
           }
         };
-        
-        log('Original payload: ' + JSON.stringify(payload), 'debug');
-        
-        // Encrypt
-        log('Encrypting with AES-256-GCM...', 'debug');
+
+        log('Original: ' + JSON.stringify(payload), 'debug');
+
+        // Domain validation via Wasm
+        if (wasmCore) {
+          const testDomains = ['localhost', 'https://example.com', 'attacker.com'];
+          for (const d of testDomains) {
+            const norm = wasmCore.normalizeDomain(d);
+            log(`Wasm normalize "${d}" -> "${norm}"`, 'wasm');
+          }
+        }
+
+        log('Encrypting with AES-256-GCM + Wasm validation...', 'wasm');
         const encrypted = await encryptCredentials(
           payload,
           ['localhost', '127.0.0.1', 'example.com'],
           'custom'
         );
-        
+
         encryptedEl.textContent = JSON.stringify(encrypted, null, 2);
         log('Encryption complete!', 'success');
-        log(`IV: ${encrypted.iv}`, 'debug');
-        log(`Salt: ${encrypted.salt}`, 'debug');
-        log(`Payload (base64): ${encrypted.encryptedPayload.substring(0, 40)}...`, 'debug');
-        
-        // Verify integrity
+
+        // Wasm integrity check
+        if (wasmCore) {
+          const configJson = JSON.stringify(encrypted);
+          const isValidStruct = wasmCore.validateConfigStructure(configJson);
+          log(`Wasm structure validation: ${isValidStruct ? 'PASSED' : 'FAILED'}`, 'wasm');
+        }
+
         const isValid = await verifyIntegrity(encrypted);
-        log(`Integrity hash: ${encrypted.integrity?.substring(0, 30)}...`, 'debug');
-        log(`Integrity verification: ${isValid ? 'PASSED' : 'FAILED'}`, isValid ? 'success' : 'error');
-        
-        // Decrypt
+        log(`Integrity: ${isValid ? 'PASSED' : 'FAILED'}`, isValid ? 'success' : 'error');
+
         log('Decrypting...', 'debug');
         const decrypted = await decryptCredentials(encrypted, 'localhost');
-        
+
         decryptedEl.textContent = JSON.stringify(decrypted, null, 2);
         log('Decryption complete!', 'success');
-        log('Full encrypt -> decrypt cycle successful!', 'success');
-        
-        // Try decrypting from wrong domain (should fail)
+
+        // Test unauthorized domain with Wasm
         log('Testing unauthorized domain...', 'debug');
+        if (wasmCore) {
+          const authCheck = wasmCore.isDomainAuthorized(
+            'attacker.com',
+            JSON.stringify(encrypted.authorizedDomains)
+          );
+          log(`Wasm auth check for attacker.com: ${authCheck ? 'ALLOWED (BAD!)' : 'DENIED (GOOD!)'}`, authCheck ? 'error' : 'success');
+        }
+
         try {
           await decryptCredentials(encrypted, 'attacker.com');
-          log('ERROR: Should have rejected unauthorized domain!', 'error');
+          log('ERROR: Should have rejected!', 'error');
         } catch (e) {
-          log('Correctly rejected unauthorized domain: ' + e.message, 'success');
+          log('Correctly rejected: ' + e.message, 'success');
         }
-        
+
+        refreshStats();
+
       } catch (err) {
-        log(`Encryption demo failed: ${err.message}`, 'error');
+        log(`Demo failed: ${err.message}`, 'error');
         encryptedEl.textContent = 'Error: ' + err.message;
         decryptedEl.textContent = '-';
       }
@@ -750,15 +897,15 @@
     // Health check
     window.runHealthCheck = async function() {
       const resultEl = document.getElementById('health-result');
-      log('Running health check...', 'info');
-      
+      log('Running secure health check...', 'wasm');
+
       const sw = navigator.serviceWorker.controller;
       if (!sw) {
         resultEl.innerHTML = '<span class="status-indicator status-error"><span class="status-dot"></span>No SW Controller</span>';
-        log('Health check failed: No Service Worker controller', 'error');
+        log('Health check failed: No controller', 'error');
         return;
       }
-      
+
       try {
         const channel = new MessageChannel();
         const response = await new Promise((resolve, reject) => {
@@ -769,13 +916,16 @@
           };
           sw.postMessage({ type: 'HEALTH_CHECK' }, [channel.port2]);
         });
-        
+
         if (response.success) {
-          resultEl.innerHTML = '<span class="status-indicator status-success"><span class="status-dot"></span>Healthy</span>';
+          resultEl.innerHTML = '<span class="status-indicator status-success"><span class="status-dot"></span>Healthy (Wasm)</span>';
           log('Health check passed!', 'success');
+          if (response.stats) {
+            log(`SW Stats: ${JSON.stringify(response.stats)}`, 'wasm');
+          }
         } else {
           resultEl.innerHTML = '<span class="status-indicator status-error"><span class="status-dot"></span>Unhealthy</span>';
-          log('Health check failed: ' + (response.error || 'Unknown error'), 'error');
+          log('Health check failed: ' + (response.error || 'Unknown'), 'error');
         }
       } catch (err) {
         resultEl.innerHTML = '<span class="status-indicator status-error"><span class="status-dot"></span>Error</span>';
@@ -788,7 +938,6 @@
       initServiceWorker();
     });
 
-    // Also start immediately if DOM is ready
     if (document.readyState !== 'loading') {
       initServiceWorker();
     }

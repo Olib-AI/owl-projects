@@ -1,0 +1,32 @@
+{
+    "actorOutputSchemaVersion": 1,
+    "title": "StealthFormBot Output Schema",
+    "description": "Output schema for the StealthFormBot form submission actor. Results are stored in the default dataset with each submission as a single item. Screenshots are stored in the default key-value store.",
+    "type": "object",
+    "properties": {
+        "submissionResults": {
+            "type": "string",
+            "title": "Form Submission Results",
+            "description": "Complete form submission results including status, timing, and any extracted confirmation data",
+            "template": "{{links.apiDefaultDatasetUrl}}/items"
+        },
+        "screenshotBefore": {
+            "type": "string",
+            "title": "Screenshot Before Submit",
+            "description": "Screenshot taken immediately before form submission",
+            "template": "{{links.apiDefaultKeyValueStoreUrl}}/records/screenshot_before"
+        },
+        "screenshotAfter": {
+            "type": "string",
+            "title": "Screenshot After Submit",
+            "description": "Screenshot taken immediately after form submission",
+            "template": "{{links.apiDefaultKeyValueStoreUrl}}/records/screenshot_after"
+        },
+        "screenshotError": {
+            "type": "string",
+            "title": "Screenshot On Error",
+            "description": "Screenshot taken when an error occurred during form submission",
+            "template": "{{links.apiDefaultKeyValueStoreUrl}}/records/screenshot_error"
+        }
+    }
+}

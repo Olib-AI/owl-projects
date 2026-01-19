@@ -25,6 +25,7 @@ import asyncio
 import json
 import logging
 import os
+import secrets
 import sys
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -188,6 +189,7 @@ def parse_input(input_data: dict[str, Any]) -> ActorInput:
         apify_proxy = ApifyProxyConfig(
             groups=input_data.get("apifyProxyGroups", []),
             country_code=input_data.get("apifyProxyCountry"),
+            session_id=input_data.get("apifyProxySessionId"),
         )
     
     # Parse retry config
@@ -395,10 +397,16 @@ async def apify_main() -> None:
             try:
                 proxy_groups = actor_input.get("apifyProxyGroups", [])
                 country_code = actor_input.get("apifyProxyCountry")
+                session_id = actor_input.get("apifyProxySessionId")
+
+                # Generate a session ID if not provided to ensure consistent IP
+                # Session IDs must be max 50 chars, alphanumeric with underscore, dot, tilde
+                if not session_id:
+                    session_id = f"stealthformbot_{secrets.token_hex(8)}"
 
                 logger.info(
                     f"Configuring Apify proxy - Groups: {proxy_groups or 'default'}, "
-                    f"Country: {country_code or 'any'}"
+                    f"Country: {country_code or 'any'}, Session: {session_id}"
                 )
 
                 proxy_config = await Actor.create_proxy_configuration(
@@ -407,7 +415,8 @@ async def apify_main() -> None:
                 )
 
                 if proxy_config:
-                    apify_proxy_url = await proxy_config.new_url()
+                    # Use session_id for proxy session persistence (same IP across requests)
+                    apify_proxy_url = await proxy_config.new_url(session_id=session_id)
                     logger.info(f"Apify proxy URL obtained: {apify_proxy_url[:50]}...")
                 else:
                     logger.warning("Failed to create Apify proxy configuration")
