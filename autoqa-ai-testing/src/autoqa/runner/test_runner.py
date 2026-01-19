@@ -13,6 +13,7 @@ Executes tests using owl-browser SDK v2 with:
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import re
 import time
@@ -752,7 +753,11 @@ class TestRunner:
                     context_id=context_id,
                     selector=selector,
                 )
-                is_visible = visibility_result.get("visible", False) if isinstance(visibility_result, dict) else bool(visibility_result)
+                # SDK v2 returns {'success': True, ...} when visible
+                if isinstance(visibility_result, dict):
+                    is_visible = visibility_result.get("success", visibility_result.get("visible", False))
+                else:
+                    is_visible = bool(visibility_result)
 
                 if not is_visible:
                     # Element exists but not visible - scroll to it
@@ -770,7 +775,10 @@ class TestRunner:
                         context_id=context_id,
                         selector=selector,
                     )
-                    is_visible = visibility_result.get("visible", False) if isinstance(visibility_result, dict) else bool(visibility_result)
+                    if isinstance(visibility_result, dict):
+                        is_visible = visibility_result.get("success", visibility_result.get("visible", False))
+                    else:
+                        is_visible = bool(visibility_result)
                     if not is_visible:
                         raise ElementNotInteractableError(
                             f"Element not visible: {selector}"
@@ -782,7 +790,11 @@ class TestRunner:
                         context_id=context_id,
                         selector=selector,
                     )
-                    is_enabled = enabled_result.get("enabled", True) if isinstance(enabled_result, dict) else bool(enabled_result)
+                    # SDK v2 returns {'success': True, ...} when enabled
+                    if isinstance(enabled_result, dict):
+                        is_enabled = enabled_result.get("success", enabled_result.get("enabled", True))
+                    else:
+                        is_enabled = bool(enabled_result)
                     if not is_enabled:
                         raise ElementNotInteractableError(
                             f"Element not enabled: {selector}"
@@ -960,19 +972,37 @@ class TestRunner:
 
         SDK v2 Notes:
             - Uses screenshot method with context_id
-            - Returns path or saves to specified location
+            - SDK returns base64-encoded image data
+            - We decode and save to the specified path
         """
         try:
             # Sanitize test name for filename
             safe_name = re.sub(r"[^\w\-_]", "_", test_name)
             timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
-            screenshot_path = str(
+            screenshot_path = Path(
                 self._artifact_dir / f"failure_{safe_name}_{step_index}_{timestamp}.png"
             )
-            await self._browser.screenshot(context_id=context_id, path=screenshot_path)
-            artifacts[f"failure_screenshot_{step_index}"] = screenshot_path
-            self._log.info("Captured failure screenshot", path=screenshot_path)
-            return screenshot_path
+
+            # SDK returns base64-encoded image data (no path parameter)
+            result = await self._browser.screenshot(context_id=context_id)
+
+            # Extract base64 data from result
+            if isinstance(result, dict):
+                image_data = result.get("data") or result.get("image") or result.get("screenshot")
+            else:
+                image_data = result
+
+            if image_data:
+                # Decode base64 and save to file
+                image_bytes = base64.b64decode(image_data)
+                screenshot_path.write_bytes(image_bytes)
+                screenshot_path_str = str(screenshot_path)
+                artifacts[f"failure_screenshot_{step_index}"] = screenshot_path_str
+                self._log.info("Captured failure screenshot", path=screenshot_path_str)
+                return screenshot_path_str
+            else:
+                self._log.warning("Screenshot result contained no image data", result=result)
+                return None
         except Exception as ss_error:
             self._log.warning("Failed to capture failure screenshot", error=str(ss_error))
             return None
@@ -1013,6 +1043,7 @@ class TestRunner:
             - Method names map to OwlBrowser methods
             - context_id is always passed
             - Method names: goto -> navigate, type -> type_
+            - screenshot: SDK returns base64, we handle path/filename saving
         """
         if method_name.startswith("_assert"):
             return await self._execute_assertion(context_id, method_name, args, step)
@@ -1020,7 +1051,6 @@ class TestRunner:
         # Map old method names to SDK v2 method names
         method_map = {
             "goto": "navigate",
-            "type": "type_",
             "get_current_url": "get_page_info",  # Extract url from result
         }
         actual_method_name = method_map.get(method_name, method_name)
@@ -1028,6 +1058,19 @@ class TestRunner:
         method = getattr(self._browser, actual_method_name, None)
         if method is None:
             raise ValueError(f"Unknown browser method: {method_name} (mapped to: {actual_method_name})")
+
+        # Special handling for screenshot: SDK doesn't support path parameter
+        # It returns base64-encoded image data, we save it ourselves
+        if actual_method_name == "screenshot":
+            screenshot_path = args.pop("path", None)
+            args_with_context = {"context_id": context_id, **args}
+            result = await method(**args_with_context)
+
+            # SDK returns base64-encoded image string
+            if screenshot_path and result:
+                await self._save_screenshot(result, screenshot_path)
+
+            return result
 
         # Add context_id to args
         args_with_context = {"context_id": context_id, **args}
@@ -1038,6 +1081,29 @@ class TestRunner:
             return result.get("url")
 
         return result
+
+    async def _save_screenshot(self, base64_data: str, filename: str) -> None:
+        """
+        Save a base64-encoded screenshot to a file.
+
+        Args:
+            base64_data: Base64-encoded image data from SDK
+            filename: Filename (will be placed in artifacts directory)
+        """
+        try:
+            # Ensure artifacts directory exists
+            self._artifact_dir.mkdir(parents=True, exist_ok=True)
+
+            # Construct full path
+            screenshot_path = self._artifact_dir / filename
+
+            # Decode and save
+            image_bytes = base64.b64decode(base64_data)
+            screenshot_path.write_bytes(image_bytes)
+
+            self._log.info("Screenshot saved", path=str(screenshot_path))
+        except Exception as e:
+            self._log.warning("Failed to save screenshot", filename=filename, error=str(e))
 
     async def _execute_assertion(
         self,

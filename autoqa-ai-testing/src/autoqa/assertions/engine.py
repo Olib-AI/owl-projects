@@ -7,10 +7,16 @@ Provides comprehensive assertions for:
 - Network requests (status codes, response times, content)
 - URL validation
 - Custom JavaScript assertions
+
+SDK v2 Notes:
+- All browser operations are async
+- Engine takes browser and context_id parameters
+- All assertion methods are async
 """
 
 from __future__ import annotations
 
+import asyncio
 import re
 import time
 from dataclasses import dataclass
@@ -36,7 +42,7 @@ from autoqa.dsl.models import (
 )
 
 if TYPE_CHECKING:
-    from owl_browser import BrowserContext
+    from owl_browser import OwlBrowser
 
     from autoqa.assertions.ml_engine import MLAssertionEngine
 
@@ -78,6 +84,11 @@ class AssertionEngine:
     """
     Executes assertions against the browser context.
 
+    SDK v2 Notes:
+    - Takes browser and context_id instead of page object
+    - All browser operations are async
+    - All assertion methods are async
+
     Supports:
     - Element assertions (visibility, enabled, checked, text, attributes)
     - Visual regression assertions
@@ -88,12 +99,13 @@ class AssertionEngine:
     - Custom JavaScript assertions
     """
 
-    def __init__(self, page: BrowserContext) -> None:
-        self._page = page
+    def __init__(self, browser: OwlBrowser, context_id: str) -> None:
+        self._browser = browser
+        self._context_id = context_id
         self._log = logger.bind(component="assertion_engine")
         self._network_log_cache: list[dict[str, Any]] | None = None
 
-    def assert_element(self, config: AssertionConfig) -> bool:
+    async def assert_element(self, config: AssertionConfig) -> bool:
         """
         Execute an element assertion.
 
@@ -107,7 +119,7 @@ class AssertionEngine:
 
         for attempt in range(config.retry_count + 1):
             try:
-                result = self._evaluate_assertion(config)
+                result = await self._evaluate_assertion(config)
                 if result:
                     return True
             except Exception as e:
@@ -120,7 +132,7 @@ class AssertionEngine:
                     ) from e
 
             if attempt < config.retry_count:
-                time.sleep(config.timeout / 1000 / (config.retry_count + 1))
+                await asyncio.sleep(config.timeout / 1000 / (config.retry_count + 1))
 
         raise AssertionError(
             config.message or f"Assertion failed after {config.retry_count + 1} attempts",
@@ -128,109 +140,109 @@ class AssertionEngine:
             operator=config.operator,
         )
 
-    def _evaluate_assertion(self, config: AssertionConfig) -> bool:
+    async def _evaluate_assertion(self, config: AssertionConfig) -> bool:
         """Evaluate a single assertion."""
         match config.operator:
             # Element existence
             case AssertionOperator.EXISTS:
-                return self._check_exists(config.selector)
+                return await self._check_exists(config.selector)
             case AssertionOperator.NOT_EXISTS:
-                return not self._check_exists(config.selector)
+                return not await self._check_exists(config.selector)
 
             # Element state assertions
             case AssertionOperator.IS_VISIBLE:
-                return self._page.is_visible(config.selector)  # type: ignore[arg-type]
+                return await self._is_visible(config.selector)
             case AssertionOperator.IS_HIDDEN:
-                return not self._page.is_visible(config.selector)  # type: ignore[arg-type]
+                return not await self._is_visible(config.selector)
             case AssertionOperator.IS_ENABLED:
-                return self._page.is_enabled(config.selector)  # type: ignore[arg-type]
+                return await self._is_enabled(config.selector)
             case AssertionOperator.IS_DISABLED:
-                return not self._page.is_enabled(config.selector)  # type: ignore[arg-type]
+                return not await self._is_enabled(config.selector)
             case AssertionOperator.IS_CHECKED:
-                return self._page.is_checked(config.selector)  # type: ignore[arg-type]
+                return await self._is_checked(config.selector)
             case AssertionOperator.IS_UNCHECKED:
-                return not self._page.is_checked(config.selector)  # type: ignore[arg-type]
+                return not await self._is_checked(config.selector)
 
             # Value comparisons
             case AssertionOperator.EQUALS:
-                actual = self._get_value(config)
+                actual = await self._get_value(config)
                 return actual == config.expected
             case AssertionOperator.NOT_EQUALS:
-                actual = self._get_value(config)
+                actual = await self._get_value(config)
                 return actual != config.expected
             case AssertionOperator.CONTAINS:
-                actual = self._get_value(config)
+                actual = await self._get_value(config)
                 return config.expected in str(actual)
             case AssertionOperator.NOT_CONTAINS:
-                actual = self._get_value(config)
+                actual = await self._get_value(config)
                 return config.expected not in str(actual)
             case AssertionOperator.MATCHES:
-                actual = self._get_value(config)
+                actual = await self._get_value(config)
                 return bool(re.search(str(config.expected), str(actual)))
             case AssertionOperator.STARTS_WITH:
-                actual = self._get_value(config)
+                actual = await self._get_value(config)
                 return str(actual).startswith(str(config.expected))
             case AssertionOperator.ENDS_WITH:
-                actual = self._get_value(config)
+                actual = await self._get_value(config)
                 return str(actual).endswith(str(config.expected))
 
             # Numeric comparisons
             case AssertionOperator.GREATER_THAN:
-                actual = self._get_numeric_value(config)
+                actual = await self._get_numeric_value(config)
                 return actual > float(config.expected)
             case AssertionOperator.LESS_THAN:
-                actual = self._get_numeric_value(config)
+                actual = await self._get_numeric_value(config)
                 return actual < float(config.expected)
             case AssertionOperator.GREATER_OR_EQUAL:
-                actual = self._get_numeric_value(config)
+                actual = await self._get_numeric_value(config)
                 return actual >= float(config.expected)
             case AssertionOperator.LESS_OR_EQUAL:
-                actual = self._get_numeric_value(config)
+                actual = await self._get_numeric_value(config)
                 return actual <= float(config.expected)
 
             # Boolean assertions
             case AssertionOperator.IS_TRUTHY:
-                actual = self._get_value(config)
+                actual = await self._get_value(config)
                 return bool(actual)
             case AssertionOperator.IS_FALSY:
-                actual = self._get_value(config)
+                actual = await self._get_value(config)
                 return not bool(actual)
 
             # URL assertions
             case AssertionOperator.URL_EQUALS:
-                return self._get_current_url() == str(config.expected)
+                return await self._get_current_url() == str(config.expected)
             case AssertionOperator.URL_CONTAINS:
-                return str(config.expected) in self._get_current_url()
+                return str(config.expected) in await self._get_current_url()
             case AssertionOperator.URL_MATCHES:
-                return bool(re.search(str(config.expected), self._get_current_url()))
+                return bool(re.search(str(config.expected), await self._get_current_url()))
 
             # Attribute assertions
             case AssertionOperator.HAS_ATTRIBUTE:
                 if not config.selector or not config.attribute:
                     return False
-                attr_value = self._page.get_attribute(config.selector, config.attribute)
+                attr_value = await self._get_attribute(config.selector, config.attribute)
                 return attr_value is not None
             case AssertionOperator.ATTRIBUTE_EQUALS:
                 if not config.selector or not config.attribute:
                     return False
-                attr_value = self._page.get_attribute(config.selector, config.attribute)
+                attr_value = await self._get_attribute(config.selector, config.attribute)
                 return attr_value == config.expected
             case AssertionOperator.ATTRIBUTE_CONTAINS:
                 if not config.selector or not config.attribute:
                     return False
-                attr_value = self._page.get_attribute(config.selector, config.attribute)
+                attr_value = await self._get_attribute(config.selector, config.attribute)
                 return attr_value is not None and str(config.expected) in str(attr_value)
 
             # Network assertions (handled separately but can be triggered via operator)
             case AssertionOperator.REQUEST_MADE:
-                return self._check_request_made(str(config.expected))
+                return await self._check_request_made(str(config.expected))
             case AssertionOperator.STATUS_CODE_EQUALS:
-                return self._check_status_code(str(config.selector), int(config.expected))
+                return await self._check_status_code(str(config.selector), int(config.expected))
             case AssertionOperator.STATUS_CODE_IN_RANGE:
                 # expected should be "200-299" format
                 parts = str(config.expected).split("-")
                 if len(parts) == 2:
-                    return self._check_status_code_range(
+                    return await self._check_status_code_range(
                         str(config.selector), int(parts[0]), int(parts[1])
                     )
                 return False
@@ -238,31 +250,108 @@ class AssertionEngine:
             case _:
                 raise ValueError(f"Unknown operator: {config.operator}")
 
-    def _check_exists(self, selector: str | None) -> bool:
+    async def _check_exists(self, selector: str | None) -> bool:
         """Check if element exists."""
         if not selector:
             return False
         try:
             # Try to check visibility - if no error, element exists
-            self._page.is_visible(selector)
+            await self._is_visible(selector)
             return True
         except Exception:
             return False
 
-    def _get_value(self, config: AssertionConfig) -> Any:
+    async def _is_visible(self, selector: str | None) -> bool:
+        """Check if element is visible."""
+        if not selector:
+            return False
+        try:
+            result = await self._browser.is_visible(
+                context_id=self._context_id,
+                selector=selector,
+            )
+            # SDK returns {'success': True, 'error_code': 'visible', ...} when visible
+            # or {'success': False, ...} when not visible
+            if isinstance(result, dict):
+                # Check for 'success' key (SDK v2 format) or fallback to 'visible' key
+                if "success" in result:
+                    return result.get("success", False)
+                return result.get("visible", False)
+            return bool(result)
+        except Exception:
+            return False
+
+    async def _is_enabled(self, selector: str | None) -> bool:
+        """Check if element is enabled."""
+        if not selector:
+            return False
+        try:
+            result = await self._browser.is_enabled(
+                context_id=self._context_id,
+                selector=selector,
+            )
+            # SDK returns {'success': True, ...} when enabled
+            if isinstance(result, dict):
+                if "success" in result:
+                    return result.get("success", False)
+                return result.get("enabled", False)
+            return bool(result)
+        except Exception:
+            return False
+
+    async def _is_checked(self, selector: str | None) -> bool:
+        """Check if element is checked."""
+        if not selector:
+            return False
+        try:
+            result = await self._browser.is_checked(
+                context_id=self._context_id,
+                selector=selector,
+            )
+            # SDK returns {'success': True, ...} when checked
+            if isinstance(result, dict):
+                if "success" in result:
+                    return result.get("success", False)
+                return result.get("checked", False)
+            return bool(result)
+        except Exception:
+            return False
+
+    async def _get_attribute(self, selector: str, attribute: str) -> str | None:
+        """Get element attribute value."""
+        try:
+            result = await self._browser.get_attribute(
+                context_id=self._context_id,
+                selector=selector,
+                attribute=attribute,
+            )
+            return result.get("value") if isinstance(result, dict) else result
+        except Exception:
+            return None
+
+    async def _get_value(self, config: AssertionConfig) -> Any:
         """Get value for comparison."""
         if config.attribute and config.selector:
-            return self._page.get_attribute(config.selector, config.attribute)
+            return await self._get_attribute(config.selector, config.attribute)
         elif config.property and config.selector:
             script = f"document.querySelector('{config.selector}').{config.property}"
-            return self._page.evaluate(script, return_value=True)
+            result = await self._browser.evaluate(
+                context_id=self._context_id,
+                script=script,
+                return_value=True,
+            )
+            return result.get("result") if isinstance(result, dict) else result
         elif config.selector:
-            return self._page.extract_text(config.selector)
+            result = await self._browser.extract_text(
+                context_id=self._context_id,
+                selector=config.selector,
+            )
+            return result.get("text") if isinstance(result, dict) else result
         return None
 
-    def _get_numeric_value(self, config: AssertionConfig) -> float:
+    async def _get_numeric_value(self, config: AssertionConfig) -> float:
         """Get numeric value for comparison."""
-        value = self._get_value(config)
+        value = await self._get_value(config)
         if value is None:
             raise AssertionError(f"Could not get value from selector: {config.selector}")
         try:
@@ -271,45 +360,47 @@ class AssertionEngine:
         except ValueError as e:
             raise AssertionError(f"Value '{value}' is not numeric") from e
 
-    def _get_current_url(self) -> str:
+    async def _get_current_url(self) -> str:
         """Get current page URL."""
         try:
-            return self._page.evaluate("window.location.href", return_value=True) or ""
+            result = await self._browser.get_page_info(context_id=self._context_id)
+            return result.get("url", "") if isinstance(result, dict) else ""
         except Exception:
             return ""
 
-    def _get_network_log(self) -> list[dict[str, Any]]:
+    async def _get_network_log(self) -> list[dict[str, Any]]:
         """Get cached or fresh network log."""
         if self._network_log_cache is None:
             try:
-                self._network_log_cache = self._page.get_network_log()
+                result = await self._browser.get_network_log(context_id=self._context_id)
+                self._network_log_cache = result.get("entries", []) if isinstance(result, dict) else []
             except Exception:
                 self._network_log_cache = []
         return self._network_log_cache
 
-    def _check_request_made(self, url_pattern: str) -> bool:
+    async def _check_request_made(self, url_pattern: str) -> bool:
         """Check if a request matching the pattern was made."""
-        network_log = self._get_network_log()
+        network_log = await self._get_network_log()
         for entry in network_log:
             url = entry.get("url", "")
             if url_pattern in url or re.search(url_pattern, url):
                 return True
         return False
 
-    def _check_status_code(self, url_pattern: str, expected_status: int) -> bool:
+    async def _check_status_code(self, url_pattern: str, expected_status: int) -> bool:
         """Check if request matching pattern has expected status code."""
-        network_log = self._get_network_log()
+        network_log = await self._get_network_log()
         for entry in network_log:
             url = entry.get("url", "")
             if url_pattern in url or re.search(url_pattern, url):
                 return entry.get("status") == expected_status
         return False
 
-    def _check_status_code_range(
+    async def _check_status_code_range(
         self, url_pattern: str, min_status: int, max_status: int
     ) -> bool:
         """Check if request matching pattern has status code in range."""
-        network_log = self._get_network_log()
+        network_log = await self._get_network_log()
         for entry in network_log:
             url = entry.get("url", "")
             if url_pattern in url or re.search(url_pattern, url):
@@ -317,7 +408,7 @@ class AssertionEngine:
                 return min_status <= status <= max_status
         return False
 
-    def assert_url(
+    async def assert_url(
         self,
         url_pattern: str,
         is_regex: bool = False,
@@ -337,7 +428,7 @@ class AssertionEngine:
         Raises:
             AssertionError: If URL does not match
         """
-        current_url = self._get_current_url()
+        current_url = await self._get_current_url()
 
         if is_regex:
             if re.search(url_pattern, current_url):
@@ -353,7 +444,7 @@ class AssertionEngine:
             operator="url_matches" if is_regex else "url_contains",
         )
 
-    def assert_attribute(
+    async def assert_attribute(
         self,
         selector: str,
         attribute: str,
@@ -378,7 +469,7 @@ class AssertionEngine:
             AssertionError: If attribute assertion fails
         """
         try:
-            actual = self._page.get_attribute(selector, attribute)
+            actual = await self._get_attribute(selector, attribute)
         except Exception as e:
             raise AssertionError(
                 message or f"Failed to get attribute '{attribute}' from '{selector}'",
@@ -409,7 +500,7 @@ class AssertionEngine:
             operator=str(operator),
         )
 
-    def assert_state(
+    async def assert_state(
         self,
         selector: str,
         state: str,
@@ -434,11 +525,11 @@ class AssertionEngine:
         try:
             match state.lower():
                 case "visible":
-                    actual = self._page.is_visible(selector)
+                    actual = await self._is_visible(selector)
                 case "enabled":
-                    actual = self._page.is_enabled(selector)
+                    actual = await self._is_enabled(selector)
                 case "checked":
-                    actual = self._page.is_checked(selector)
+                    actual = await self._is_checked(selector)
                 case _:
                     raise ValueError(f"Unknown state: {state}")
         except Exception as e:
@@ -456,7 +547,7 @@ class AssertionEngine:
             actual=f"{state}={actual}",
         )
 
-    def assert_text(
+    async def assert_text(
         self,
         selector: str,
         expected: str,
@@ -481,7 +572,11 @@ class AssertionEngine:
             AssertionError: If text assertion fails
         """
         try:
-            actual = self._page.extract_text(selector)
+            result = await self._browser.extract_text(
+                context_id=self._context_id,
+                selector=selector,
+            )
+            actual = result.get("text") if isinstance(result, dict) else result
         except Exception as e:
             raise AssertionError(
                 message or f"Failed to extract text from '{selector}'",
@@ -515,7 +610,7 @@ class AssertionEngine:
             operator=str(operator),
         )
 
-    def assert_visual(
+    async def assert_visual(
         self,
         config: VisualAssertionConfig,
         artifact_dir: Path,
@@ -546,9 +641,9 @@ class AssertionEngine:
         # FIX: Properly capture element screenshot when selector is provided
         if config.selector:
             # Use element screenshot for selector-based visual assertions
-            screenshot = self._capture_element_screenshot(config.selector)
+            screenshot = await self._capture_element_screenshot(config.selector)
         else:
-            screenshot = self._page.screenshot()
+            screenshot = await self._take_screenshot()
 
         result = engine.compare(
             baseline_name=config.baseline_name,
@@ -594,7 +689,21 @@ class AssertionEngine:
 
         return True
 
-    def _capture_element_screenshot(self, selector: str) -> bytes:
+    async def _take_screenshot(self) -> bytes:
+        """Take a full page screenshot and return as bytes."""
+        import base64
+
+        result = await self._browser.screenshot(context_id=self._context_id)
+        if isinstance(result, dict):
+            image_data = result.get("data") or result.get("image") or result.get("screenshot")
+        else:
+            image_data = result
+
+        if image_data:
+            return base64.b64decode(image_data)
+        return b""
+
+    async def _capture_element_screenshot(self, selector: str) -> bytes:
         """
         Capture screenshot of a specific element.
 
@@ -619,17 +728,22 @@ class AssertionEngine:
         }})()
         """
         try:
-            bbox = self._page.evaluate(script, return_value=True)
+            result = await self._browser.evaluate(
+                context_id=self._context_id,
+                script=script,
+                return_value=True,
+            )
+            bbox = result.get("result") if isinstance(result, dict) else result
             if bbox is None:
                 self._log.warning("Element not found for screenshot", selector=selector)
-                return self._page.screenshot()
+                return await self._take_screenshot()
 
             # Take full page screenshot and crop to element
             import io
 
             from PIL import Image
 
-            full_screenshot = self._page.screenshot()
+            full_screenshot = await self._take_screenshot()
             img = Image.open(io.BytesIO(full_screenshot))
 
             # Calculate crop coordinates
@@ -652,9 +766,9 @@ class AssertionEngine:
                 selector=selector,
                 error=str(e),
             )
-            return self._page.screenshot()
+            return await self._take_screenshot()
 
-    def assert_network(self, config: NetworkAssertionConfig) -> bool:
+    async def assert_network(self, config: NetworkAssertionConfig) -> bool:
         """
         Execute a network assertion.
 
@@ -667,7 +781,7 @@ class AssertionEngine:
         start_time = time.monotonic()
         timeout_sec = config.timeout / 1000
 
-        network_log = self._page.get_network_log()
+        network_log = await self._get_network_log()
 
         matching_entries = self._filter_network_entries(network_log, config)
 
@@ -740,7 +854,7 @@ class AssertionEngine:
 
         return result
 
-    def assert_custom(self, config: CustomAssertionConfig) -> bool:
+    async def assert_custom(self, config: CustomAssertionConfig) -> bool:
         """
         Execute a custom JavaScript assertion.
 
@@ -751,11 +865,13 @@ class AssertionEngine:
             AssertionError: If custom assertion fails
         """
         try:
-            result = self._page.evaluate(
-                config.script,
+            eval_result = await self._browser.evaluate(
+                context_id=self._context_id,
+                script=config.script,
                 args=config.args if config.args else None,
                 return_value=True,
             )
+            result = eval_result.get("result") if isinstance(eval_result, dict) else eval_result
         except Exception as e:
             raise AssertionError(
                 config.message or f"Script execution failed: {e}"

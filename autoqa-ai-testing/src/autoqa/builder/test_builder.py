@@ -253,7 +253,7 @@ class AutoTestBuilder:
 
         try:
             # Fill username
-            await self._browser.type_(
+            await self._browser.type(
                 context_id=context_id,
                 selector=username_selector,
                 text=self._config.username or "",
@@ -261,7 +261,7 @@ class AutoTestBuilder:
             await asyncio.sleep(0.2)
 
             # Fill password
-            await self._browser.type_(
+            await self._browser.type(
                 context_id=context_id,
                 selector=password_selector,
                 text=self._config.password or "",
@@ -697,51 +697,83 @@ class AutoTestBuilder:
     def _generate_semantic_selector(
         self,
         raw: dict[str, Any],
-        element_type: ElementType,
+        element_type: ElementType,  # noqa: ARG002
     ) -> str:
         """
-        Generate a semantic selector for owl-browser.
+        Generate a valid CSS selector for the element.
 
-        owl-browser uses semantic selectors that describe the element
-        in natural language rather than CSS selectors.
+        Priority order for selector generation:
+        1. ID selector (#id) - most reliable
+        2. data-testid attribute - testing best practice
+        3. name attribute - useful for form elements
+        4. aria-label attribute - accessible elements
+        5. class-based selector with tag
+        6. Tag + type/role attributes
         """
-        # Priority order for selector generation:
-        # 1. aria-label (most semantic)
-        # 2. Visible text content
-        # 3. Placeholder text
-        # 4. Name attribute (for form fields)
-        # 5. Title attribute
-        # 6. ID as fallback
+        tag = raw.get("tagName", "div")
 
-        if raw.get("ariaLabel"):
-            return raw["ariaLabel"]
-
-        if raw.get("text"):
-            text = raw["text"].strip()
-            if len(text) <= 50 and text:
-                return text
-
-        if raw.get("placeholder"):
-            return raw["placeholder"]
-
-        if raw.get("name"):
-            # Make name more readable
-            name = raw["name"].replace("_", " ").replace("-", " ")
-            if element_type in (ElementType.INPUT_TEXT, ElementType.INPUT_EMAIL,
-                               ElementType.INPUT_PASSWORD, ElementType.TEXTAREA):
-                return f"{name} input"
-            return name
-
-        if raw.get("title"):
-            return raw["title"]
-
+        # 1. ID selector - most reliable and unique
         if raw.get("id"):
-            # Convert id to readable format
-            id_text = raw["id"].replace("_", " ").replace("-", " ")
-            return id_text
+            return f"#{raw['id']}"
 
-        # Fallback to CSS selector for truly unnamed elements
-        return self._build_css_fallback(raw, element_type)
+        # 2. data-testid attribute - testing best practice
+        # (Would need to be added to the JS extraction)
+
+        # 3. Name attribute - very useful for form elements
+        if raw.get("name"):
+            return f"{tag}[name='{raw['name']}']"
+
+        # 4. aria-label attribute - good for accessible elements
+        if raw.get("ariaLabel"):
+            # Escape quotes in aria-label value
+            label = raw["ariaLabel"].replace("'", "\\'")
+            return f"{tag}[aria-label='{label}']"
+
+        # 5. Class-based selector with tag (use first non-generic class)
+        if raw.get("className"):
+            classes = raw["className"].split()
+            # Filter out common generic/utility classes
+            generic_classes = frozenset({
+                "active", "disabled", "hidden", "visible", "show", "hide",
+                "btn", "button", "input", "form-control", "container",
+                "row", "col", "flex", "grid", "block", "inline",
+            })
+            meaningful_classes = [
+                c for c in classes
+                if c and c not in generic_classes and not c.startswith("_")
+            ]
+            if meaningful_classes:
+                return f"{tag}.{meaningful_classes[0]}"
+
+        # 6. Type attribute for inputs
+        if raw.get("type") and tag == "input":
+            input_type = raw["type"]
+            # For common types, add placeholder/title context if available
+            if raw.get("placeholder"):
+                placeholder = raw["placeholder"].replace("'", "\\'")
+                return f"input[type='{input_type}'][placeholder='{placeholder}']"
+            return f"input[type='{input_type}']"
+
+        # 7. href attribute for links (partial match for paths)
+        if raw.get("href") and tag == "a":
+            href = raw["href"]
+            # Use partial match for relative paths
+            if href.startswith("/") or href.startswith("#"):
+                return f"a[href='{href}']"
+            # For full URLs, match the path portion
+            if "://" in href:
+                from urllib.parse import urlparse
+                path = urlparse(href).path
+                if path and path != "/":
+                    return f"a[href*='{path}']"
+
+        # 8. Fallback: tag with any distinguishing attribute
+        if raw.get("title"):
+            title = raw["title"].replace("'", "\\'")
+            return f"{tag}[title='{title}']"
+
+        # 9. Last resort: just the tag (may match multiple elements)
+        return tag
 
     def _build_css_fallback(
         self,
@@ -932,6 +964,13 @@ class AutoTestBuilder:
         # Add final assertions
         final_assertions = self._generate_final_assertions()
         spec["steps"].extend(final_assertions)
+
+        # Remove internal fields (starting with _) from steps before YAML output
+        # These fields are for internal use and not part of the DSL schema
+        for step in spec["steps"]:
+            keys_to_remove = [k for k in step.keys() if k.startswith("_")]
+            for key in keys_to_remove:
+                del step[key]
 
         # Convert to YAML
         yaml_content = yaml.dump(
