@@ -142,18 +142,21 @@ class AssertionEngine:
 
     async def _evaluate_assertion(self, config: AssertionConfig) -> bool:
         """Evaluate a single assertion."""
+        # Use timeout from config or default to 5000ms
+        timeout_ms = config.timeout if config.timeout > 0 else 5000
+
         match config.operator:
             # Element existence
             case AssertionOperator.EXISTS:
-                return await self._check_exists(config.selector)
+                return await self._check_exists(config.selector, timeout_ms)
             case AssertionOperator.NOT_EXISTS:
-                return not await self._check_exists(config.selector)
+                return not await self._check_exists(config.selector, timeout_ms)
 
             # Element state assertions
             case AssertionOperator.IS_VISIBLE:
-                return await self._is_visible(config.selector)
+                return await self._is_visible(config.selector, timeout_ms)
             case AssertionOperator.IS_HIDDEN:
-                return not await self._is_visible(config.selector)
+                return not await self._is_visible(config.selector, timeout_ms)
             case AssertionOperator.IS_ENABLED:
                 return await self._is_enabled(config.selector)
             case AssertionOperator.IS_DISABLED:
@@ -250,22 +253,45 @@ class AssertionEngine:
             case _:
                 raise ValueError(f"Unknown operator: {config.operator}")
 
-    async def _check_exists(self, selector: str | None) -> bool:
-        """Check if element exists."""
+    async def _check_exists(self, selector: str | None, timeout_ms: int = 5000) -> bool:
+        """Check if element exists with smart waiting."""
         if not selector:
             return False
         try:
-            # Try to check visibility - if no error, element exists
-            await self._is_visible(selector)
+            # Wait for element to exist in DOM
+            await self._browser.wait_for_selector(
+                context_id=self._context_id,
+                selector=selector,
+                timeout=timeout_ms,
+            )
             return True
         except Exception:
             return False
 
-    async def _is_visible(self, selector: str | None) -> bool:
-        """Check if element is visible."""
+    async def _is_visible(self, selector: str | None, timeout_ms: int = 5000) -> bool:
+        """
+        Check if element is visible with smart waiting.
+
+        For dynamic elements and text-based selectors, waits for element
+        to appear before checking visibility.
+        """
         if not selector:
             return False
+
         try:
+            # First, try to wait for the element to exist
+            # This is especially important for text-based selectors
+            try:
+                await self._browser.wait_for_selector(
+                    context_id=self._context_id,
+                    selector=selector,
+                    timeout=timeout_ms,
+                )
+            except Exception:
+                # Element not found within timeout - not visible
+                return False
+
+            # Now check visibility
             result = await self._browser.is_visible(
                 context_id=self._context_id,
                 selector=selector,
@@ -340,7 +366,8 @@ class AssertionEngine:
                 script=script,
                 return_value=True,
             )
-            return result.get("result") if isinstance(result, dict) else result
+            # SDK returns the evaluated expression directly (not wrapped in "result" key)
+            return result
         elif config.selector:
             result = await self._browser.extract_text(
                 context_id=self._context_id,
@@ -733,7 +760,8 @@ class AssertionEngine:
                 script=script,
                 return_value=True,
             )
-            bbox = result.get("result") if isinstance(result, dict) else result
+            # SDK returns the evaluated expression directly (not wrapped in "result" key)
+            bbox = result
             if bbox is None:
                 self._log.warning("Element not found for screenshot", selector=selector)
                 return await self._take_screenshot()
@@ -871,7 +899,8 @@ class AssertionEngine:
                 args=config.args if config.args else None,
                 return_value=True,
             )
-            result = eval_result.get("result") if isinstance(eval_result, dict) else eval_result
+            # SDK returns the evaluated expression directly (not wrapped in "result" key)
+            result = eval_result
         except Exception as e:
             raise AssertionError(
                 config.message or f"Script execution failed: {e}"

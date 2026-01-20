@@ -208,8 +208,19 @@ class DSLParser:
         self._validator = validator or DSLValidator()
         self._log = logger.bind(component="dsl_parser")
 
-    def parse_file(self, path: str | Path) -> TestSpec | TestSuite:
-        """Parse a YAML test file."""
+    def parse_file(
+        self,
+        path: str | Path,
+        variables: dict[str, str] | None = None,
+    ) -> TestSpec | TestSuite:
+        """
+        Parse a YAML test file.
+
+        Args:
+            path: Path to the YAML file.
+            variables: Optional variables to use for interpolation. These take
+                precedence over variables defined in the YAML file.
+        """
         file_path = Path(path)
         if not file_path.exists():
             raise DSLParseError(f"File not found: {file_path}")
@@ -218,7 +229,7 @@ class DSLParser:
 
         self._log.info("Parsing test file", path=str(file_path))
         content = file_path.read_text(encoding="utf-8")
-        return self.parse_string(content, source_file=str(file_path))
+        return self.parse_string(content, source_file=str(file_path), variables=variables)
 
     def parse_string(
         self,
@@ -238,9 +249,14 @@ class DSLParser:
         if not isinstance(raw_data, dict):
             raise DSLParseError("YAML root must be a mapping/dictionary")
 
-        combined_vars = {**(variables or {})}
+        # Combine variables with proper precedence:
+        # 1. Start with spec-defined variables (defaults/placeholders)
+        # 2. Override with passed variables (CLI --var takes precedence)
+        combined_vars: dict[str, Any] = {}
         if "variables" in raw_data and isinstance(raw_data["variables"], dict):
             combined_vars.update(raw_data["variables"])
+        # CLI variables override spec variables
+        combined_vars.update(variables or {})
 
         resolved_data = self._resolve_variables(raw_data, combined_vars)
         resolved_data = self._resolve_secrets(resolved_data)
@@ -338,8 +354,18 @@ class DSLParser:
         directory: str | Path,
         pattern: str = "**/*.yaml",
         recursive: bool = True,
+        variables: dict[str, str] | None = None,
     ) -> list[TestSpec | TestSuite]:
-        """Parse all YAML files in a directory."""
+        """
+        Parse all YAML files in a directory.
+
+        Args:
+            directory: Directory to search for YAML files.
+            pattern: Glob pattern for matching files.
+            recursive: Whether to search recursively.
+            variables: Optional variables to use for interpolation. These take
+                precedence over variables defined in the YAML files.
+        """
         dir_path = Path(directory)
         if not dir_path.exists():
             raise DSLParseError(f"Directory not found: {dir_path}")
@@ -353,7 +379,7 @@ class DSLParser:
             if file_path.name.startswith("."):
                 continue
             try:
-                result = self.parse_file(file_path)
+                result = self.parse_file(file_path, variables=variables)
                 results.append(result)
             except DSLParseError as e:
                 self._log.error("Failed to parse file", path=str(file_path), error=str(e))

@@ -36,6 +36,23 @@ from autoqa.builder.llm_enhanced import (
     create_enhanced_builder,
 )
 
+# Intelligent layer for smart element classification and selector scoring
+from autoqa.builder.intelligent_layer import (
+    ElementCategory,
+    WaitStrategyHint,
+    AssertionTypeHint,
+    InteractionHint,
+    ElementCategoryInfo,
+    SelectorReliabilityScore,
+    PageType,
+    PageTypeInfo,
+    CATEGORY_CONFIG,
+    ElementClassifier,
+    SelectorReliabilityScorer,
+    PageTypeDetector,
+    create_intelligent_builder_layer,
+)
+
 # Analyzer module
 from autoqa.builder.analyzer import (
     PageAnalyzer,
@@ -132,6 +149,20 @@ __all__ = [
     "LLMEnhancedTestBuilder",
     "PageAnalysis",
     "create_enhanced_builder",
+    # Intelligent Layer
+    "ElementCategory",
+    "WaitStrategyHint",
+    "AssertionTypeHint",
+    "InteractionHint",
+    "ElementCategoryInfo",
+    "SelectorReliabilityScore",
+    "PageType",
+    "PageTypeInfo",
+    "CATEGORY_CONFIG",
+    "ElementClassifier",
+    "SelectorReliabilityScorer",
+    "PageTypeDetector",
+    "create_intelligent_builder_layer",
     # Analyzer
     "PageAnalyzer",
     "AnalyzerConfig",

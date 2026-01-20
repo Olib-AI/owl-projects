@@ -375,27 +375,32 @@ async def _cmd_run_async(args: argparse.Namespace) -> int:
     # Load environment variables from .env file
     load_dotenv()
 
+    # Parse CLI variables FIRST so they can be used during YAML parsing.
+    # This ensures CLI variables (--var key=value) take precedence over
+    # placeholder variables defined in the YAML spec.
+    variables: dict[str, str] = {}
+    for var in args.variables:
+        if "=" in var:
+            key, value = var.split("=", 1)
+            variables[key] = value
+
     parser = DSLParser()
     specs: list[TestSpec | TestSuite] = []
 
     for path_str in args.paths:
         path = Path(path_str)
         if path.is_dir():
-            specs.extend(parser.parse_directory(path))
+            # Pass CLI variables to parser for interpolation at parse time
+            specs.extend(parser.parse_directory(path, variables=variables))
         elif path.is_file():
-            specs.append(parser.parse_file(path))
+            # Pass CLI variables to parser for interpolation at parse time
+            specs.append(parser.parse_file(path, variables=variables))
         else:
             print(f"Warning: Path not found: {path}", file=sys.stderr)
 
     if not specs:
         print("No test specifications found", file=sys.stderr)
         return 1
-
-    variables = {}
-    for var in args.variables:
-        if "=" in var:
-            key, value = var.split("=", 1)
-            variables[key] = value
 
     healing_engine = SelfHealingEngine(
         history_path=args.healing_history,

@@ -136,6 +136,54 @@ steps:
 
         assert spec.steps[0].url == "https://example.com/login"
 
+    def test_cli_variables_override_spec_variables(self) -> None:
+        """Test that CLI variables override empty spec variables (placeholders).
+
+        This is critical for the 'type' action to work correctly when YAML has
+        placeholder variables like 'username: ""' that should be overridden
+        by CLI --var arguments.
+        """
+        yaml_content = '''
+name: Login Test
+variables:
+  username: ""
+  password: ""
+steps:
+  - action: type
+    selector: "#username"
+    text: "${username}"
+  - action: type
+    selector: "#password"
+    text: "${password}"
+'''
+        # Simulate CLI variables passed via --var
+        cli_variables = {"username": "demo_user", "password": "demo_pass"}
+
+        parser = DSLParser()
+        spec = parser.parse_string(yaml_content, variables=cli_variables)
+
+        # CLI variables should override the empty placeholders
+        assert spec.steps[0].text == "demo_user"
+        assert spec.steps[1].text == "demo_pass"
+
+    def test_cli_variables_override_non_empty_spec_variables(self) -> None:
+        """Test that CLI variables also override non-empty spec variables."""
+        yaml_content = '''
+name: Override Test
+variables:
+  env: staging
+steps:
+  - action: navigate
+    url: "https://${env}.example.com"
+'''
+        # CLI variable should override spec variable
+        cli_variables = {"env": "production"}
+
+        parser = DSLParser()
+        spec = parser.parse_string(yaml_content, variables=cli_variables)
+
+        assert spec.steps[0].url == "https://production.example.com"
+
     def test_parse_file(self, temp_dir: Path, sample_test_spec: str) -> None:
         """Test parsing from file."""
         os.environ["TEST_PASSWORD"] = "secret123"

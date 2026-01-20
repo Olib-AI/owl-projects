@@ -35,6 +35,12 @@ from autoqa.dsl.models import (
 )
 from autoqa.dsl.transformer import StepTransformer
 from autoqa.runner.self_healing import HealingResult, SelfHealingEngine
+from autoqa.runner.intelligent_layer import (
+    SmartWaiter,
+    OverlayHandler,
+    FallbackSelectorHandler,
+    WaitStrategy,
+)
 from autoqa.versioning.history_tracker import TestRunHistory
 from autoqa.versioning.models import VersioningConfig
 
@@ -178,6 +184,8 @@ class TestRunner:
         enable_versioning: bool = False,
         versioning_storage_path: str = ".autoqa/history",
         enable_url_recovery: bool = True,
+        enable_intelligent_layer: bool = True,
+        enable_overlay_handling: bool = True,
     ) -> None:
         self._browser = browser
         self._healing_engine = healing_engine or SelfHealingEngine()
@@ -190,12 +198,24 @@ class TestRunner:
         self._network_idle_timeout = network_idle_timeout_ms
         self._pre_action_visibility_check = pre_action_visibility_check
         self._enable_url_recovery = enable_url_recovery
+        self._enable_intelligent_layer = enable_intelligent_layer
+        self._enable_overlay_handling = enable_overlay_handling
         self._transformer = StepTransformer()
         self._log = logger.bind(component="test_runner")
 
         # URL recovery tracking - stores the expected URL from navigate actions
         # and step-level _expected_url metadata
         self._current_expected_url: str | None = None
+
+        # Intelligent layer components
+        if enable_intelligent_layer:
+            self._smart_waiter = SmartWaiter(browser, default_timeout_ms)
+            self._overlay_handler = OverlayHandler(browser)
+            self._fallback_handler = FallbackSelectorHandler(browser)
+        else:
+            self._smart_waiter = None
+            self._overlay_handler = None
+            self._fallback_handler = None
 
         # Versioning support
         self._enable_versioning = enable_versioning
@@ -234,7 +254,8 @@ class TestRunner:
             status=StepStatus.RUNNING,
             started_at=datetime.now(UTC),
             total_steps=len(spec.steps),
-            variables={**(variables or {}), **spec.variables},
+            # CLI variables override spec.variables - spec provides defaults
+            variables={**spec.variables, **(variables or {})},
         )
 
         own_context = context_id is None
@@ -728,21 +749,52 @@ class TestRunner:
         timeout: int | None = None,
     ) -> None:
         """
-        Ensure element is visible and enabled before interaction.
+        Ensure element is visible, enabled, and not blocked before interaction.
 
         SDK v2 Notes:
             - Uses wait_for_selector, is_visible, is_enabled async methods
             - All methods require context_id parameter
+            - Intelligent layer: checks for blocking overlays and dismisses them
+            - Dynamic elements get extended waits with retry logic
         """
         effective_timeout = timeout or self._default_timeout
 
-        # Wait for selector to exist
+        # INTELLIGENT LAYER: Use smart waiter for dynamic elements
+        if self._smart_waiter and self._enable_intelligent_layer:
+            is_dynamic = self._smart_waiter.is_dynamic_selector(selector)
+            if is_dynamic:
+                # Dynamic elements need extended timeout and retry
+                effective_timeout = max(effective_timeout, 8000)
+                self._log.debug(
+                    "Using extended wait for dynamic element",
+                    selector=selector,
+                    timeout=effective_timeout,
+                )
+
+        # Wait for selector to exist with smart retry for dynamic elements
         try:
+            if self._smart_waiter and self._enable_intelligent_layer:
+                strategy = self._smart_waiter.get_recommended_strategy(selector)
+                if strategy == WaitStrategy.DYNAMIC_ELEMENT:
+                    # Use smart waiter with retry for dynamic elements
+                    success = await self._smart_waiter.wait_for_element_with_retry(
+                        context_id=context_id,
+                        selector=selector,
+                        timeout_ms=effective_timeout,
+                        max_retries=3,
+                    )
+                    if not success:
+                        raise ElementNotFoundError(f"Dynamic element not found: {selector}")
+                    return  # Element is ready
+
+            # Standard wait for non-dynamic elements
             await self._browser.wait_for_selector(
                 context_id=context_id,
                 selector=selector,
                 timeout=effective_timeout,
             )
+        except ElementNotFoundError:
+            raise
         except Exception as e:
             raise ElementNotFoundError(f"Element not found: {selector}") from e
 
@@ -784,6 +836,19 @@ class TestRunner:
                             f"Element not visible: {selector}"
                         )
 
+                # INTELLIGENT LAYER: Check for blocking overlays
+                if self._enable_overlay_handling and self._overlay_handler:
+                    overlay_cleared = await self._overlay_handler.handle_blocking_overlay(
+                        context_id, selector
+                    )
+                    if not overlay_cleared:
+                        self._log.warning(
+                            "Element may be blocked by overlay",
+                            selector=selector,
+                        )
+                        # Continue anyway - the click might still work
+                        # or fail with a more specific error
+
                 # Check if element is enabled (for interactive elements)
                 try:
                     enabled_result = await self._browser.is_enabled(
@@ -809,16 +874,46 @@ class TestRunner:
                 # Visibility check failed but element exists, proceed anyway
                 pass
 
-    async def _wait_for_stable_state(self, context_id: str) -> None:
-        """Wait for network idle and stable DOM state."""
-        try:
-            await self._browser.wait_for_network_idle(
+    async def _wait_for_stable_state(
+        self,
+        context_id: str,
+        strategy: WaitStrategy | None = None,
+    ) -> None:
+        """
+        Wait for page to be in a stable state for interaction.
+
+        Uses intelligent layer's smart waiter if enabled, otherwise falls back
+        to basic network idle wait.
+
+        Args:
+            context_id: Browser context ID
+            strategy: Optional specific wait strategy to use
+        """
+        # Use intelligent layer's smart waiter if available
+        if self._smart_waiter and self._enable_intelligent_layer:
+            effective_strategy = strategy or WaitStrategy.NETWORK_IDLE
+            result = await self._smart_waiter.wait_for_ready(
                 context_id=context_id,
-                idle_time=500,
-                timeout=self._network_idle_timeout,
+                strategy=effective_strategy,
+                timeout_ms=self._network_idle_timeout,
             )
-        except Exception as e:
-            self._log.debug("Network idle wait timed out", error=str(e))
+            if not result.success:
+                self._log.debug(
+                    "Smart wait did not complete",
+                    strategy=effective_strategy,
+                    wait_time_ms=result.wait_time_ms,
+                    error=result.error,
+                )
+        else:
+            # Fallback to basic network idle wait
+            try:
+                await self._browser.wait_for_network_idle(
+                    context_id=context_id,
+                    idle_time=500,
+                    timeout=self._network_idle_timeout,
+                )
+            except Exception as e:
+                self._log.debug("Network idle wait timed out", error=str(e))
 
     async def _verify_or_recover_url(
         self,
