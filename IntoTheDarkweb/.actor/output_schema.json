@@ -1,0 +1,32 @@
+{
+    "actorOutputSchemaVersion": 1,
+    "title": "Into The Darkweb Output",
+    "description": "Results from Tor browsing sessions. Easy Access returns page HTML. Browser Experience returns per-action results. Screenshots are stored in the key-value store.",
+    "type": "object",
+    "properties": {
+        "results": {
+            "type": "string",
+            "title": "Browsing Results",
+            "description": "Complete results including status, HTML content (Easy Access), or per-action results with timing (Browser Experience)",
+            "template": "{{links.apiDefaultDatasetUrl}}/items"
+        },
+        "screenshot_1": {
+            "type": "string",
+            "title": "Screenshot 1",
+            "description": "First screenshot captured during a Browser Experience session",
+            "template": "{{links.apiDefaultKeyValueStoreUrl}}/records/screenshot_1"
+        },
+        "screenshot_2": {
+            "type": "string",
+            "title": "Screenshot 2",
+            "description": "Second screenshot captured during a Browser Experience session",
+            "template": "{{links.apiDefaultKeyValueStoreUrl}}/records/screenshot_2"
+        },
+        "screenshot_3": {
+            "type": "string",
+            "title": "Screenshot 3",
+            "description": "Third screenshot captured during a Browser Experience session",
+            "template": "{{links.apiDefaultKeyValueStoreUrl}}/records/screenshot_3"
+        }
+    }
+}

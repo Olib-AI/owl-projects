@@ -1,0 +1,41 @@
+[project]
+name = "into-the-darkweb"
+version = "1.0.0"
+description = "Apify actor for accessing the darkweb and .onion sites through the Tor network via Owl Browser"
+readme = "README.md"
+requires-python = ">=3.12"
+license = {text = "MIT"}
+authors = [
+    {name = "Olib AI", email = "info@olib.ai"}
+]
+
+dependencies = [
+    "apify>=1.7.0",
+    "owl-browser>=2.0.1",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "mypy>=1.7.0",
+    "ruff>=0.1.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_return_any = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+select = ["E", "F", "W", "I", "B", "UP", "C4", "SIM", "RUF"]
+ignore = ["E501"]

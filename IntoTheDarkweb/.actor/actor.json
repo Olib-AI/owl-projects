@@ -1,0 +1,22 @@
+{
+    "actorSpecification": 1,
+    "name": "into-the-darkweb",
+    "title": "Into The Darkweb - Tor & Onion Access",
+    "description": "Access the darkweb and .onion sites through the Tor network using Owl Browser. Two modes: Easy Access for quick page fetching, and Browser Experience for full interactive browsing sessions.",
+    "version": "1.0",
+    "buildTag": "latest",
+    "meta": {
+        "templateId": "python-start"
+    },
+    "input": "./input_schema.json",
+    "output": "./output_schema.json",
+    "dockerfile": "../Dockerfile",
+    "minMemoryMbytes": 128,
+    "maxMemoryMbytes": 512,
+    "categories": ["SCRAPING"],
+    "seoTitle": "Darkweb & Tor Browser Access | Onion Site Scraper | Apify Actor",
+    "seoDescription": "Access .onion sites and the darkweb through the Tor network. Easy one-shot page fetching or full interactive browser sessions with clicks, forms, screenshots, and more.",
+    "authors": ["Olib AI"],
+    "isPublic": true,
+    "usesStandbyMode": false
+}

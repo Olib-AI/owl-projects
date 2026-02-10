@@ -1,0 +1,86 @@
+{
+    "title": "Into The Darkweb - Input",
+    "description": "Access .onion sites and the darkweb through the Tor network. Choose Easy Access for quick page fetching or Browser Experience for full interactive sessions.",
+    "type": "object",
+    "schemaVersion": 1,
+    "required": ["mode", "region"],
+    "properties": {
+        "mode": {
+            "title": "Mode",
+            "description": "Choose the operating mode. Easy Access fetches a single page and returns its HTML. Browser Experience gives you full control with a sequence of browser actions (navigate, click, type, screenshot, etc.).",
+            "type": "string",
+            "editor": "select",
+            "enum": ["easy", "browser"],
+            "enumTitles": ["Easy Access (One-shot page fetch)", "Browser Experience (Interactive session)"],
+            "default": "easy",
+            "sectionCaption": "General Settings",
+            "sectionDescription": "Configure the basic operating mode and target region for your Tor browsing session."
+        },
+        "region": {
+            "title": "Region",
+            "description": "Select the geographic region for the Owl Browser instance. Choose the region closest to your target for best performance.",
+            "type": "string",
+            "editor": "select",
+            "enum": ["US", "EU"],
+            "enumTitles": ["United States", "Europe"],
+            "default": "US"
+        },
+        "os": {
+            "title": "OS Fingerprint",
+            "description": "Operating system fingerprint for the browser context. This affects the User-Agent string and other browser fingerprinting signals. Leave empty for the default.",
+            "type": "string",
+            "editor": "select",
+            "enum": ["windows", "macos", "linux"],
+            "enumTitles": ["Windows", "macOS", "Linux"],
+            "nullable": true
+        },
+        "url": {
+            "title": "URL",
+            "description": "The .onion URL (or any URL) to navigate to. Required for Easy Access mode. For Browser Experience mode, use the navigate action in the actions array instead.",
+            "type": "string",
+            "editor": "textfield",
+            "prefill": "http://2gzyxa5ihm7nsber64qvit6eraokhlmr6scarvb5xqi6hx4i7flrcbad.onion",
+            "sectionCaption": "Easy Access Options",
+            "sectionDescription": "Settings for Easy Access mode. Provide a URL and optional navigation parameters to fetch a single page via Tor."
+        },
+        "waitUntil": {
+            "title": "Wait Until",
+            "description": "When to consider the page navigation complete. 'load' waits for the load event, 'domcontentloaded' waits for DOMContentLoaded, 'networkidle' waits until no network connections for 500ms, 'fullscroll' scrolls the entire page first.",
+            "type": "string",
+            "editor": "select",
+            "enum": ["", "load", "domcontentloaded", "networkidle", "fullscroll"],
+            "enumTitles": ["Default", "Load", "DOM Content Loaded", "Network Idle", "Full Scroll"],
+            "nullable": true
+        },
+        "timeout": {
+            "title": "Timeout (ms)",
+            "description": "Navigation timeout in milliseconds. Tor connections can be slow, so consider using a higher value (30000-60000ms). Default: 30000ms.",
+            "type": "integer",
+            "default": 30000,
+            "minimum": 5000,
+            "maximum": 120000
+        },
+        "timezone": {
+            "title": "Timezone",
+            "description": "IANA timezone identifier for the browser context (e.g. 'America/New_York', 'Europe/London', 'Asia/Tokyo'). Only used in Browser Experience mode.",
+            "type": "string",
+            "editor": "textfield",
+            "nullable": true,
+            "sectionCaption": "Browser Experience Options",
+            "sectionDescription": "Settings for Browser Experience mode. Define a sequence of browser actions to execute within a Tor-enabled browsing session. Each action runs sequentially and results are collected."
+        },
+        "actions": {
+            "title": "Browser Actions",
+            "description": "Array of browser actions to execute sequentially. Each action is an object with an 'action' field (the action name) and action-specific parameters.\n\nAvailable actions:\n- navigate: {action: 'navigate', url: '...', wait_until: '...', timeout: 30000}\n- reload: {action: 'reload', wait_until: '...', timeout: 30000}\n- go_back / go_forward: {action: 'go_back'}\n- click: {action: 'click', selector: '#btn or 100x200 or \"Login button\"'}\n- type: {action: 'type', selector: '#input', text: 'hello'}\n- pick: {action: 'pick', selector: '#dropdown', value: 'option1'}\n- submit_form: {action: 'submit_form', selector: '#form'}\n- extract_text: {action: 'extract_text', selector: '#content'}\n- screenshot: {action: 'screenshot'}\n- get_html: {action: 'get_html'}\n- scroll_by: {action: 'scroll_by', x: 0, y: 500}\n- scroll_to_element: {action: 'scroll_to_element', selector: '#footer'}\n- scroll_to_top / scroll_to_bottom: {action: 'scroll_to_top'}\n- wait_for_selector: {action: 'wait_for_selector', selector: '#loaded', timeout: 10000}\n- get_page_info: {action: 'get_page_info'}\n- get_cookies / delete_cookies: {action: 'get_cookies'}\n- set_cookie: {action: 'set_cookie', name: 'key', value: 'val', domain: '.example.onion'}\n- evaluate: {action: 'evaluate', script: 'document.title'}",
+            "type": "array",
+            "editor": "json",
+            "prefill": [
+                {"action": "navigate", "url": "http://2gzyxa5ihm7nsber64qvit6eraokhlmr6scarvb5xqi6hx4i7flrcbad.onion"},
+                {"action": "wait_for_selector", "selector": "#content", "timeout": 15000},
+                {"action": "screenshot"},
+                {"action": "extract_text"},
+                {"action": "get_html"}
+            ]
+        }
+    }
+}
