@@ -68,6 +68,7 @@ Creates a Tor-enabled browser context, runs each action sequentially, collects a
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `url` | string | Yes (easy mode) | — | The .onion URL or any URL to fetch |
+| `outputFormat` | string | No | `"html"` | Output format: `"html"` (raw HTML), `"text"` (extracted plain text), `"markdown"` (markdown conversion) |
 | `waitUntil` | string | No | — | When navigation is complete: `"load"`, `"domcontentloaded"`, `"networkidle"`, `"fullscroll"` |
 | `timeout` | integer | No | `30000` | Navigation timeout in milliseconds (5000–120000) |
 
@@ -144,7 +145,8 @@ Each action in the `actions` array is a JSON object with an `action` field and a
 ```json
 {
     "url": "http://example.onion",
-    "html": "<!DOCTYPE html>...",
+    "content": "<!DOCTYPE html>...",
+    "outputFormat": "html",
     "status": "success",
     "region": "US",
     "timestamp": "2025-01-15T12:00:00+00:00"

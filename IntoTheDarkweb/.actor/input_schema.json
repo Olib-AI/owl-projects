@@ -43,6 +43,15 @@
             "sectionCaption": "Easy Access Options",
             "sectionDescription": "Settings for Easy Access mode. Provide a URL and optional navigation parameters to fetch a single page via Tor."
         },
+        "outputFormat": {
+            "title": "Output Format",
+            "description": "Format of the returned page content. 'html' returns raw HTML, 'text' returns extracted plain text, 'markdown' returns markdown conversion.",
+            "type": "string",
+            "editor": "select",
+            "enum": ["html", "text", "markdown"],
+            "enumTitles": ["HTML", "Text", "Markdown"],
+            "default": "html"
+        },
         "waitUntil": {
             "title": "Wait Until",
             "description": "When to consider the page navigation complete. 'load' waits for the load event, 'domcontentloaded' waits for DOMContentLoaded, 'networkidle' waits until no network connections for 500ms, 'fullscroll' scrolls the entire page first.",

@@ -173,26 +173,35 @@ async def run_easy_access(browser: OwlBrowser, input_data: dict[str, Any]) -> di
     if timeout := input_data.get("timeout"):
         params["timeout"] = int(timeout)
 
+    output_format: str = input_data.get("outputFormat", "html")
+    if output_format in ("html", "text", "markdown"):
+        params["output"] = output_format
+
     # Charge for page fetch
     await Actor.charge(event_name="page-fetch")
 
-    logger.info("Easy Access: fetching %s via Tor", url)
+    logger.info("Easy Access: fetching %s via Tor (output=%s)", url, output_format)
     result = await browser.execute("browser_go", **params)
 
-    html_content: str
+    content: str
     if isinstance(result, str):
-        html_content = result
+        content = result
     elif isinstance(result, dict):
-        # SDK may wrap result in a dict with 'html', 'content', or 'result' keys
-        html_content = str(
-            result.get("html") or result.get("content") or result.get("result") or result
+        content = str(
+            result.get("html")
+            or result.get("text")
+            or result.get("markdown")
+            or result.get("content")
+            or result.get("result")
+            or result
         )
     else:
-        html_content = str(result)
+        content = str(result)
 
     return {
         "url": url,
-        "html": html_content,
+        "content": content,
+        "outputFormat": output_format,
         "status": "success",
         "region": input_data["region"],
         "timestamp": _utc_iso(),

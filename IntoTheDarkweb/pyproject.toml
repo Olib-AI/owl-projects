@@ -11,7 +11,7 @@ authors = [
 
 dependencies = [
     "apify>=1.7.0",
-    "owl-browser>=2.0.1",
+    "owl-browser>=2.0.2",
     "python-dotenv>=1.0.0",
 ]
 
