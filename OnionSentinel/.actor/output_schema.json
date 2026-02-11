@@ -1,0 +1,14 @@
+{
+    "actorOutputSchemaVersion": 1,
+    "title": "OnionSentinel Monitoring Results",
+    "description": "Threat findings and monitoring metadata from dark web sites. Results include keyword matches, page snippets, and references to evidence screenshots in the key-value store.",
+    "type": "object",
+    "properties": {
+        "results": {
+            "title": "Scan Results",
+            "type": "string",
+            "description": "The monitoring results pushed to the dataset, including findings and metadata.",
+            "template": "{{links.apiDefaultDatasetUrl}}/items"
+        }
+    }
+}

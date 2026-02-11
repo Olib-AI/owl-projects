@@ -1,0 +1,22 @@
+{
+    "actorSpecification": 1,
+    "name": "onion-sentinel",
+    "title": "OnionSentinel - Dark Web Threat Intelligence Monitor",
+    "description": "Automated dark web monitoring for threat intelligence. Scans .onion forums and marketplaces for specific keywords and data leaks using Owl Browser's secure Tor infrastructure.",
+    "version": "1.0",
+    "buildTag": "latest",
+    "meta": {
+        "templateId": "python-start"
+    },
+    "input": "./input_schema.json",
+    "output": "./output_schema.json",
+    "dockerfile": "../Dockerfile",
+    "minMemoryMbytes": 256,
+    "maxMemoryMbytes": 1024,
+    "categories": ["MONITORING", "SCRAPING"],
+    "seoTitle": "Dark Web Threat Intelligence Monitor | OnionSentinel | Apify Actor",
+    "seoDescription": "Automated dark web threat intelligence monitoring. Scan .onion sites for data leaks and brand mentions with evidence capture via Owl Browser.",
+    "authors": ["Olib AI"],
+    "isPublic": true,
+    "usesStandbyMode": false
+}

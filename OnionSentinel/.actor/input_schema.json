@@ -1,0 +1,92 @@
+{
+    "title": "OnionSentinel - Dark Web Monitoring & Discovery Input",
+    "description": "Monitor .onion sites for threats or discover new targets using dark web search engines.",
+    "type": "object",
+    "schemaVersion": 1,
+    "required": ["mode", "region"],
+    "properties": {
+        "mode": {
+            "title": "Mode",
+            "description": "Choose between 'monitoring' (scan specific targets), 'discovery' (find new .onion sites) or 'uptime-check' (verify link availability).",
+            "type": "string",
+            "editor": "select",
+            "enum": ["monitoring", "discovery", "uptime-check"],
+            "enumTitles": ["Monitoring (Scan specific sites)", "Discovery (Find new sites)", "Uptime Check (Verify links)"],
+            "default": "monitoring",
+            "sectionCaption": "General Settings"
+        },
+        "query": {
+            "title": "Discovery Query",
+            "description": "Search query for Discovery mode (e.g., 'marketplaces', 'forums', 'leaks').",
+            "type": "string",
+            "editor": "textfield",
+            "prefill": "marketplaces",
+            "sectionCaption": "Discovery Options",
+            "sectionDescription": "Settings for finding new .onion sites using dark web search engines."
+        },
+        "targets": {
+            "title": "Monitoring Targets",
+            "description": "List of .onion URLs to monitor (Monitoring mode only). Max 10 URLs.",
+            "type": "array",
+            "editor": "json",
+            "maxItems": 10,
+            "prefill": [
+                {
+                    "url": "http://2gzyxa5ihm7nsber64qvit6eraokhlmr6scarvb5xqi6hx4i7flrcbad.onion",
+                    "label": "Example Forum",
+                    "type": "forum"
+                }
+            ],
+            "sectionCaption": "Monitoring Scope",
+            "sectionDescription": "Define which dark web sites to monitor and what to look for."
+        },
+        "keywords": {
+            "title": "Keywords & Queries",
+            "description": "List of keywords to look for (Monitoring mode only).",
+            "type": "array",
+            "items": {
+                "type": "string"
+            },
+            "prefill": ["database dump", "leaked"],
+            "editor": "json"
+        },
+        "region": {
+            "title": "Browser Region",
+            "description": "Select the geographic region for the Owl Browser instance.",
+            "type": "string",
+            "editor": "select",
+            "enum": ["US", "EU"],
+            "enumTitles": ["United States", "Europe"],
+            "default": "US",
+            "sectionCaption": "Performance & Stealth"
+        },
+        "maxPagesPerTarget": {
+            "title": "Max Pages per Target",
+            "description": "Limit the number of sub-pages crawled per root URL.",
+            "type": "integer",
+            "default": 10,
+            "minimum": 1,
+            "maximum": 100
+        },
+        "saveScreenshots": {
+            "title": "Save Evidence Screenshots",
+            "description": "Capture screenshots where keywords are found.",
+            "type": "boolean",
+            "default": true
+        },
+        "saveVideo": {
+            "title": "Save Evidence Video",
+            "description": "Record the entire browsing session.",
+            "type": "boolean",
+            "default": false
+        },
+        "concurrency": {
+            "title": "Concurrency",
+            "description": "Number of targets to process in parallel.",
+            "type": "integer",
+            "default": 1,
+            "minimum": 1,
+            "maximum": 5
+        }
+    }
+}
