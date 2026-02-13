@@ -17,9 +17,11 @@ import os
 import re
 import urllib.parse
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Set
+import time
 
 from apify import Actor
+from bs4 import BeautifulSoup
 from owl_browser import OwlBrowser, RemoteConfig
 
 logger = logging.getLogger("onion-sentinel")
@@ -63,6 +65,18 @@ def _extract_screenshot_bytes(result: Any) -> bytes | None:
         logger.warning("Failed to decode base64 screenshot data")
         return None
 
+async def retry_with_backoff(func, *args, retries=3, delay=5, **kwargs):
+    """Retry an async function with exponential backoff."""
+    for i in range(retries):
+        try:
+            return await func(*args, **kwargs)
+        except Exception as e:
+            if i == retries - 1:
+                raise e
+            wait_time = delay * (2 ** i)
+            logger.warning(f"Operation failed: {e}. Retrying in {wait_time}s...")
+            await asyncio.sleep(wait_time)
+
 async def process_target(
     browser: OwlBrowser, 
     target: Dict[str, Any], 
@@ -102,47 +116,84 @@ async def process_target(
         if input_data.get("saveVideo"):
             await browser.execute("browser_start_video_recording", context_id=context_id)
 
-        # 2. Navigate to root
-        nav_result = await browser.execute("browser_navigate", context_id=context_id, url=url, wait_until="load")
-        if isinstance(nav_result, dict) and not nav_result.get("success", True):
-            error_msg = nav_result.get("message", "Navigation failed")
-            logger.warning("Failed to navigate to %s: %s", url, error_msg)
-            return {"url": url, "error": error_msg, "status": "error"}
+        # 2. BFS Crawling
+        visited_urls: Set[str] = set()
+        queue = [(url, 0)]  # (url, depth)
         
-        # 3. Content extraction (using raw HTML and cleaning)
-        logger.info("Extracting content from %s", url)
-        html_result = await browser.execute("browser_get_html", context_id=context_id, clean_level="basic")
-        html_content = html_result if isinstance(html_result, str) else html_result.get("html", "") if isinstance(html_result, dict) else ""
-        
-        # Strip HTML tags for keyword matching
-        clean_content = re.sub(r'<[^>]+>', ' ', html_content)
-        content = clean_content
+        while queue and processed_pages < max_pages:
+            current_url, depth = queue.pop(0)
+            
+            if current_url in visited_urls:
+                continue
+            visited_urls.add(current_url)
 
-        found_keywords = [k for k in keywords if k.lower() in content.lower()]
-        if found_keywords:
-            logger.info("Match found on %s: %s", url, found_keywords)
-            
-            finding = {
-                "url": url,
-                "keywords": found_keywords,
-                "timestamp": _utc_iso(),
-                "snippet": content[:1000] + "..." if len(content) > 1000 else content
-            }
-            
-            # Take screenshot of findings if requested
-            if input_data.get("saveScreenshots"):
-                ss_result = await browser.execute("browser_screenshot", context_id=context_id, mode="fullpage")
+            logger.info(f"Processing {current_url} (depth {depth})")
+
+            # Navigate with retry
+            try:
+                nav_result = await retry_with_backoff(
+                    browser.execute, 
+                    "browser_navigate", 
+                    context_id=context_id, 
+                    url=current_url, 
+                    wait_until="load",
+                    timeout=60000
+                )
+            except Exception as e:
+                logger.warning(f"Failed to navigate to {current_url} after retries: {e}")
+                continue
+
+            if isinstance(nav_result, dict) and not nav_result.get("success", True):
+                logger.warning(f"Navigation failed for {current_url}: {nav_result.get('message')}")
+                continue
+
+            # 3. Content extraction (using BeautifulSoup)
+            try:
+                html_result = await browser.execute("browser_get_html", context_id=context_id, clean_level="none")
+                html_content = html_result if isinstance(html_result, str) else html_result.get("html", "") if isinstance(html_result, dict) else ""
                 
-                png_bytes = _extract_screenshot_bytes(ss_result)
-                if png_bytes:
-                    kvs = await Actor.open_key_value_store()
-                    ss_key = f"ss_{context_id}_{processed_pages}"
-                    await kvs.set_value(ss_key, png_bytes, content_type="image/png")
-                    finding["screenshotKey"] = ss_key
+                soup = BeautifulSoup(html_content, 'html.parser')
+                text_content = soup.get_text(separator=' ', strip=True)
+                
+                found_keywords = [k for k in keywords if k.lower() in text_content.lower()]
+                
+                if found_keywords:
+                    logger.info(f"Match found on {current_url}: {found_keywords}")
+                    
+                    finding = {
+                        "url": current_url,
+                        "keywords": found_keywords,
+                        "timestamp": _utc_iso(),
+                        "snippet": text_content[:1000] + "..." if len(text_content) > 1000 else text_content
+                    }
+                    
+                    if input_data.get("saveScreenshots"):
+                        ss_result = await browser.execute("browser_screenshot", context_id=context_id, mode="fullpage")
+                        png_bytes = _extract_screenshot_bytes(ss_result)
+                        if png_bytes:
+                            kvs = await Actor.open_key_value_store()
+                            ss_key = f"ss_{context_id}_{processed_pages}"
+                            await kvs.set_value(ss_key, png_bytes, content_type="image/png")
+                            finding["screenshotKey"] = ss_key
 
-            findings.append(finding)
-        
-        processed_pages = 1
+                    findings.append(finding)
+                
+                processed_pages += 1
+
+                # Extract links for next depth if we haven't hit the limit
+                if processed_pages < max_pages:
+                     for link in soup.find_all('a', href=True):
+                        href = link['href']
+                        # Resolve relative URLs
+                        full_url = urllib.parse.urljoin(current_url, href)
+                        
+                        # Only follow links to the same onion domain
+                        if urllib.parse.urlparse(full_url).netloc == urllib.parse.urlparse(url).netloc:
+                            if full_url not in visited_urls:
+                                queue.append((full_url, depth + 1))
+
+            except Exception as e:
+                logger.error(f"Error extracting content from {current_url}: {e}")
 
         # 4. Stop video and get URL if requested
         if input_data.get("saveVideo"):
@@ -156,9 +207,7 @@ async def process_target(
                     "timestamp": _utc_iso(),
                     "findings_count": len(findings)
                 }
-                # We could also download the video and save to KVS, but for now we provide the URL
                 logger.info("Video available at: %s", video_info["url"])
-                # Add video info to the result
                 results_extra = {"videoUrl": video_info["url"]}
             else:
                 results_extra = {}
@@ -213,7 +262,19 @@ async def process_uptime_target(
     try:
         start_time = datetime.now(timezone.utc)
         # Navigate and wait for load
-        nav_result = await browser.execute("browser_navigate", context_id=context_id, url=url, wait_until="load", timeout=60000)
+        try:
+            nav_result = await retry_with_backoff(
+                browser.execute, 
+                "browser_navigate", 
+                context_id=context_id, 
+                url=url, 
+                wait_until="load", 
+                timeout=60000
+            )
+        except Exception:
+             # retry_with_backoff re-raises the last exception
+             # We catch it here to return the offline status below
+             nav_result = {"success": False, "message": "Navigation failed after retries"}
         end_time = datetime.now(timezone.utc)
         
         # Check if navigation actually succeeded
@@ -295,30 +356,27 @@ async def run_discovery(browser: OwlBrowser, query: str, input_data: Dict[str, A
         results_res = await browser.execute("browser_get_html", context_id=context_id, clean_level="minimal")
         results_html = results_res if isinstance(results_res, str) else results_res.get("html", "")
         
-        # Step 3: Parse results using regex
-        # Results are in <li class="result"> blocks
-        result_blocks = re.findall(r'<li class="result">.*?</li>', results_html, re.DOTALL)
-        logger.info("Found %d raw result blocks", len(result_blocks))
-        
-        for block in result_blocks:
+        # Step 3: Parse results using BeautifulSoup
+        soup = BeautifulSoup(results_html, 'html.parser')
+        result_items = soup.find_all('li', class_='result')
+        logger.info(f"Found {len(result_items)} result blocks")
+
+        for item in result_items:
             # Extract onion domain from <cite>
-            cite_match = re.search(r'<cite>([^<]+)</cite>', block)
-            if not cite_match:
+            cite_tag = item.find('cite')
+            if not cite_tag:
                 continue
-                
-            onion_domain = cite_match.group(1).strip()
+            
+            onion_domain = cite_tag.get_text().strip()
             url = f"http://{onion_domain}" if not onion_domain.startswith("http") else onion_domain
             
-            # Extract title (look for the link in h4)
-            title_match = re.search(r'<h4>.*?<a[^>]*>(.*?)</a>.*?</h4>', block, re.DOTALL)
-            title = title_match.group(1).strip() if title_match else "No Title"
-            # Clean HTML tags from title
-            title = re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', '', title)).strip()
+            # Extract title
+            title_tag = item.find('h4')
+            title = title_tag.get_text().strip() if title_tag else "No Title"
             
-            # Extract description (look for p tag)
-            desc_match = re.search(r'<p>(.*?)</p>', block, re.DOTALL)
-            description = desc_match.group(1).strip() if desc_match else "No Description"
-            description = re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', '', description)).strip()
+            # Extract description
+            desc_tag = item.find('p')
+            description = desc_tag.get_text().strip() if desc_tag else "No Description"
             
             if url not in [d["url"] for d in all_discovered]:
                 all_discovered.append({

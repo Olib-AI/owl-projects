@@ -83,7 +83,18 @@ Creates a Tor-enabled browser context, runs each action sequentially, collects a
 
 ## Available Browser Actions
 
-Each action in the `actions` array is a JSON object with an `action` field and action-specific parameters. The browser context ID is injected automatically.
+Each action in the `actions` array is a JSON object with an `action` field and action-specific parameters.
+
+### Global Options (Available for all actions)
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `retries` | integer | `0` | Number of times to retry the action if it fails. |
+| `retry_delay` | integer | `1000` | Delay in milliseconds between retries. |
+| `on_error` | string | `"throw"` | Strategy if action validation fails or retries are exhausted: `"throw"` (fail actor), `"continue"` (log and proceed), `"break"` (stop session successfully). |
+| `if_selector` | string | — | Only execute this action if the specified selector exists on the page. |
+| `pre_delay` | int/array | — | Wait before action. Fixed int (ms) or `[min, max]` (randomized). |
+| `post_delay` | int/array | — | Wait after action. Fixed int (ms) or `[min, max]` (randomized). |
 
 ### Navigation
 
@@ -112,6 +123,7 @@ Each action in the `actions` array is a JSON object with an `action` field and a
 | `screenshot` | — | Take a screenshot (saved to key-value store as PNG) |
 | `get_page_info` | — | Get current URL, title, and page metadata |
 | `evaluate` | `script` (required) | Execute JavaScript and return the result |
+| `save_content` | `key` (required), `value` (optional) | Save arbitrary data to the Apify Key-Value Store |
 
 ### Scrolling
 
@@ -127,6 +139,7 @@ Each action in the `actions` array is a JSON object with an `action` field and a
 | Action | Parameters | Description |
 |--------|-----------|-------------|
 | `wait_for_selector` | `selector` (required), `timeout` | Wait for an element to appear |
+| `wait_for_text` | `text` (required), `selector`, `timeout` | Wait for text to appear on the page |
 
 ### Cookies
 

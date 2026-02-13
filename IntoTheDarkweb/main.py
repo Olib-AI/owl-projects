@@ -20,6 +20,7 @@ import logging
 import os
 from datetime import datetime, timezone
 from typing import Any
+import random
 
 from apify import Actor
 from owl_browser import OwlBrowser, RemoteConfig
@@ -46,11 +47,23 @@ VALID_ACTIONS: dict[str, dict[str, list[str]]] = {
     "scroll_to_top": {"required": [], "optional": []},
     "scroll_to_bottom": {"required": [], "optional": []},
     "wait_for_selector": {"required": ["selector"], "optional": ["timeout"]},
+    "wait_for_text": {"required": ["text"], "optional": ["selector", "timeout"]},
     "get_page_info": {"required": [], "optional": []},
     "get_cookies": {"required": [], "optional": []},
     "set_cookie": {"required": ["name", "value"], "optional": ["domain", "path"]},
     "delete_cookies": {"required": [], "optional": []},
     "evaluate": {"required": ["script"], "optional": []},
+    "save_content": {"required": ["key"], "optional": ["value"]},
+}
+
+
+GLOBAL_OPTIONAL_PARAMS = {
+    "retries",
+    "retry_delay",
+    "on_error",
+    "if_selector",
+    "pre_delay",
+    "post_delay",
 }
 
 
@@ -116,6 +129,27 @@ def _extract_screenshot_bytes(result: Any) -> bytes | None:
     except Exception:
         logger.warning("Failed to decode base64 screenshot data")
         return None
+
+
+def _calculate_delay(delay_config: int | list[int] | None) -> int:
+    """Calculate delay in milliseconds from config.
+
+    Args:
+        delay_config: Either a fixed integer (ms) or a [min, max] list.
+
+    Returns:
+        Delay in milliseconds.
+    """
+    if not delay_config:
+        return 0
+
+    if isinstance(delay_config, list) and len(delay_config) == 2:
+        return random.randint(delay_config[0], delay_config[1])
+
+    if isinstance(delay_config, int):
+        return delay_config
+
+    return 0
 
 
 def _validate_action(action_config: dict[str, Any], index: int) -> str | None:
@@ -266,9 +300,67 @@ async def run_browser_experience(
         for i, action_config in enumerate(actions):
             action_name: str = action_config["action"]
 
-            # Build params: everything except "action", plus context_id
+            # ---- Extract Control Parameters ----
+            retries = int(action_config.get("retries", 0))
+            retry_delay = int(action_config.get("retry_delay", 1000))
+            on_error = action_config.get("on_error", "throw")  # throw, continue, break
+            if_selector = action_config.get("if_selector")
+
+            # Human-like delays
+            pre_delay = action_config.get("pre_delay")
+            post_delay = action_config.get("post_delay")
+
+            # Validate extraction
+            if on_error not in ("throw", "continue", "break"):
+                logger.warning(
+                    "Invalid on_error '%s' at step %d. Defaulting to 'throw'.",
+                    on_error,
+                    i + 1,
+                )
+                on_error = "throw"
+
+            # ---- Conditional Execution ----
+            if if_selector:
+                logger.info("Checking condition: if_selector='%s'", if_selector)
+                try:
+                    exists = await browser.execute(
+                        "browser_evaluate",
+                        script=f"document.querySelector('{if_selector}') !== null",
+                        context_id=context_id,
+                    )
+                    if not exists:
+                        logger.info(
+                            "Condition failed (element not found). Skipping step %d (%s).",
+                            i + 1,
+                            action_name,
+                        )
+                        results.append({
+                            "step": i + 1,
+                            "action": action_name,
+                            "status": "skipped",
+                            "reason": f"if_selector '{if_selector}' not found",
+                        })
+                        continue
+                except Exception as cond_err:
+                    logger.warning(
+                        "Failed to evaluate if_selector at step %d: %s. Proceeding.",
+                        i + 1,
+                        cond_err,
+                    )
+
+            # ---- Pre-Delay ----
+            if pre_delay:
+                delay_ms = _calculate_delay(pre_delay)
+                if delay_ms > 0:
+                    logger.info("Pre-delay: sleeping %dms", delay_ms)
+                    await asyncio.sleep(delay_ms / 1000)
+
+            # ---- Build Action Params ----
+            # Exclude control params so we don't send garbage to the SDK
             params: dict[str, Any] = {
-                k: v for k, v in action_config.items() if k != "action"
+                k: v
+                for k, v in action_config.items()
+                if k not in GLOBAL_OPTIONAL_PARAMS and k != "action"
             }
             params["context_id"] = context_id
 
@@ -277,51 +369,90 @@ async def run_browser_experience(
                 params["timeout"] = int(params["timeout"])
 
             tool_name = f"browser_{action_name}"
+
+            # ---- Execution with Retry ----
+            attempt = 0
+            max_attempts = retries + 1
+            step_result: dict[str, Any] | None = None
+            step_error: Exception | None = None
+
             start_time = datetime.now(timezone.utc)
 
-            try:
-                result = await browser.execute(tool_name, **params)
-                duration_ms = int(
-                    (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
-                )
+            while attempt < max_attempts:
+                attempt += 1
+                try:
+                    if action_name == "save_content":
+                        # Local client-side action
+                        key = params.get("key")
+                        val = params.get("value")
+                        if not key:
+                            raise ValueError("save_content requires 'key'")
+                        # If value not provided, use last result? Or explicit value.
+                        # For simplicity, require explicit value or maybe use variable store later.
+                        # For now, let's assume value is passed.
+                        await kvs.set_value(key, val)
+                        result = {"key": key, "size": len(str(val))}
+                    else:
+                        # Remote browser action
+                        result = await browser.execute(tool_name, **params)
 
-                action_result: dict[str, Any] = {
-                    "step": i + 1,
-                    "action": action_name,
-                    "status": "success",
-                    "result": result,
-                    "durationMs": duration_ms,
-                }
+                    duration_ms = int(
+                        (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
+                    )
 
-                # Handle screenshot results: save PNG to key-value store
-                if action_name == "screenshot" and result is not None:
-                    png_bytes = _extract_screenshot_bytes(result)
-                    if png_bytes:
-                        screenshot_count += 1
-                        key = f"screenshot_{screenshot_count}"
-                        await kvs.set_value(key, png_bytes, content_type="image/png")
-                        action_result["screenshotKey"] = key
-                        # Replace raw base64 blob with a reference to avoid bloating dataset
-                        action_result["result"] = {
-                            "screenshotKey": key,
-                            "sizeBytes": len(png_bytes),
-                        }
-                        logger.info(
-                            "Screenshot saved to key-value store: %s (%d bytes)",
-                            key,
-                            len(png_bytes),
-                        )
+                    step_result = {
+                        "step": i + 1,
+                        "action": action_name,
+                        "status": "success",
+                        "result": result,
+                        "durationMs": duration_ms,
+                        "attempts": attempt,
+                    }
 
-                results.append(action_result)
-                logger.info(
-                    "Action %d/%d '%s' succeeded in %dms",
-                    i + 1,
-                    len(actions),
-                    action_name,
-                    duration_ms,
-                )
+                    # Handle screenshot saving
+                    if action_name == "screenshot" and result is not None:
+                        png_bytes = _extract_screenshot_bytes(result)
+                        if png_bytes:
+                            screenshot_count += 1
+                            key = f"screenshot_{screenshot_count}"
+                            await kvs.set_value(key, png_bytes, content_type="image/png")
+                            step_result["screenshotKey"] = key
+                            step_result["result"] = {
+                                "screenshotKey": key,
+                                "sizeBytes": len(png_bytes),
+                            }
+                            logger.info(
+                                "Screenshot saved: %s (%d bytes)", key, len(png_bytes)
+                            )
+                    
+                    logger.info(
+                        "Action %d/%d '%s' succeeded (attempt %d/%d)",
+                        i + 1,
+                        len(actions),
+                        action_name,
+                        attempt,
+                        max_attempts,
+                    )
+                    results.append(step_result)
+                    step_error = None
+                    break  # Success, exit retry loop
 
-            except Exception as action_err:
+                except Exception as e:
+                    step_error = e
+                    logger.warning(
+                        "Action %d/%d '%s' failed (attempt %d/%d): %s",
+                        i + 1,
+                        len(actions),
+                        action_name,
+                        attempt,
+                        max_attempts,
+                        e,
+                    )
+                    if attempt < max_attempts:
+                        await asyncio.sleep(retry_delay / 1000)
+
+            # ---- Failure Handling ----
+            if step_error:
                 duration_ms = int(
                     (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
                 )
@@ -329,17 +460,25 @@ async def run_browser_experience(
                     "step": i + 1,
                     "action": action_name,
                     "status": "error",
-                    "error": str(action_err),
+                    "error": str(step_error),
                     "durationMs": duration_ms,
+                    "attempts": attempt,
                 })
-                logger.error(
-                    "Action %d/%d '%s' failed after %dms: %s",
-                    i + 1,
-                    len(actions),
-                    action_name,
-                    duration_ms,
-                    action_err,
-                )
+
+                if on_error == "throw":
+                    raise step_error
+                elif on_error == "break":
+                    logger.info("on_error='break': stopping execution.")
+                    break
+                elif on_error == "continue":
+                    logger.info("on_error='continue': proceeding to next step.")
+
+            # ---- Post-Delay ----
+            if not step_error and post_delay:
+                delay_ms = _calculate_delay(post_delay)
+                if delay_ms > 0:
+                    logger.info("Post-delay: sleeping %dms", delay_ms)
+                    await asyncio.sleep(delay_ms / 1000)
 
     finally:
         # Always close the context to free server resources
