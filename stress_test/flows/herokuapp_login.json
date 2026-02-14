@@ -1,0 +1,30 @@
+{
+  "name": "Herokuapp Login Flow",
+  "description": "Log into the-internet.herokuapp.com test app and verify secure area loads",
+  "steps": [
+    {
+      "type": "browser_navigate",
+      "url": "https://the-internet.herokuapp.com/login"
+    },
+    {
+      "type": "browser_wait_for_network_idle"
+    },
+    {
+      "type": "browser_type",
+      "selector": "#username",
+      "text": "tomsmith"
+    },
+    {
+      "type": "browser_type",
+      "selector": "#password",
+      "text": "SuperSecretPassword!"
+    },
+    {
+      "type": "browser_click",
+      "selector": "button[type='submit']"
+    },
+    {
+      "type": "browser_wait_for_network_idle"
+    }
+  ]
+}

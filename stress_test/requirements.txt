@@ -1,0 +1,4 @@
+owl-browser>=2.0.0
+python-dotenv>=1.0.0
+reportlab>=4.0
+matplotlib>=3.8

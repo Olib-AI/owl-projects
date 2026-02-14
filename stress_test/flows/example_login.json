@@ -1,0 +1,45 @@
+{
+  "name": "Example Login Flow",
+  "description": "A sample flow that navigates to a login page, enters credentials, and verifies successful login. Replace selectors and credentials with your target app's values.",
+  "steps": [
+    {
+      "type": "browser_navigate",
+      "url": "https://example.com/login",
+      "description": "Navigate to the login page"
+    },
+    {
+      "type": "browser_wait_for_network_idle",
+      "description": "Wait for page to fully load"
+    },
+    {
+      "type": "browser_type",
+      "selector": "email input",
+      "text": "testuser@example.com",
+      "description": "Enter email address"
+    },
+    {
+      "type": "browser_type",
+      "selector": "password input",
+      "text": "testpassword123",
+      "description": "Enter password"
+    },
+    {
+      "type": "browser_click",
+      "selector": "sign in button",
+      "description": "Click the sign in button"
+    },
+    {
+      "type": "browser_wait_for_url",
+      "url_pattern": "**/dashboard**",
+      "description": "Wait for redirect to dashboard"
+    },
+    {
+      "type": "browser_extract_text",
+      "selector": "h1",
+      "description": "Extract the dashboard heading",
+      "expected": {
+        "notEmpty": true
+      }
+    }
+  ]
+}
