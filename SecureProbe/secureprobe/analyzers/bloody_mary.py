@@ -28,17 +28,12 @@ import asyncio
 import hashlib
 import json
 import re
-import sys
 import time
-from pathlib import Path
 from typing import Any, TypedDict
 from urllib.parse import parse_qs, urljoin, urlparse
 
 import httpx
 import structlog
-
-# Add python-sdk to path for owl_browser imports
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "python-sdk"))
 
 from secureprobe.analyzers.base import BaseAnalyzer
 from secureprobe.models import AnalyzerType, Finding

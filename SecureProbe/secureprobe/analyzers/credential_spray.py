@@ -10,16 +10,12 @@ from __future__ import annotations
 import asyncio
 import os
 import re
-import sys
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 from urllib.parse import urlparse
 
 import httpx
 import structlog
-
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "python-sdk"))
 
 from secureprobe.analyzers.base import BaseAnalyzer
 from secureprobe.models import AnalyzerType, Finding, ScanMode, Severity

@@ -239,7 +239,12 @@ class ScanOrchestrator:
                             context_id=context_id, url=robots_url, timeout=10000
                         )
                         robots_result = await browser.extract_text(context_id=context_id)
-                        robots_content = robots_result.get("text", "") if isinstance(robots_result, dict) else ""
+                        if isinstance(robots_result, dict):
+                            robots_content = robots_result.get("text", "")
+                        elif isinstance(robots_result, str):
+                            robots_content = robots_result
+                        else:
+                            robots_content = ""
                         if "Disallow: /" in robots_content and "User-agent: *" in robots_content:
                             logger.warning("robots_disallow_all", url=self.config.target_url)
                     except Exception:
@@ -369,41 +374,79 @@ class ScanOrchestrator:
                         )
 
                     # Get HTML content
+                    # V2 SDK returns {"html": "..."} dict from get_html
                     html_result = await browser.get_html(context_id=context_id)
-                    page_data["html"] = html_result.get("html", "") if isinstance(html_result, dict) else ""
+                    if isinstance(html_result, dict):
+                        page_data["html"] = html_result.get("html", "")
+                    elif isinstance(html_result, str):
+                        page_data["html"] = html_result
 
                     # Get cookies
+                    # V2 SDK returns a list of cookie dicts directly
                     cookies_result = await browser.get_cookies(context_id=context_id)
-                    raw_cookies = cookies_result.get("cookies", []) if isinstance(cookies_result, dict) else []
+                    if isinstance(cookies_result, list):
+                        raw_cookies = cookies_result
+                    elif isinstance(cookies_result, dict):
+                        raw_cookies = cookies_result.get("cookies", [])
+                    else:
+                        raw_cookies = []
                     page_data["cookies"] = self._convert_cookies(raw_cookies)
 
                     # Get network log
+                    # V2 SDK returns {"requests": [...], "responses": [...]}
+                    # Requests and responses are matched by "id" field
                     network_result = await browser.get_network_log(context_id=context_id)
-                    network_entries = network_result.get("entries", []) if isinstance(network_result, dict) else []
-                    page_data["network_log"] = [
-                        {
-                            "url": entry.get("url", "") if isinstance(entry, dict) else "",
-                            "method": entry.get("method", "") if isinstance(entry, dict) else "",
-                            "status": entry.get("status", 0) if isinstance(entry, dict) else 0,
-                        }
-                        for entry in network_entries[:100]
-                    ]
+                    if isinstance(network_result, dict):
+                        requests = network_result.get("requests", [])
+                        responses = network_result.get("responses", [])
+                        # Build response lookup by id for status codes
+                        resp_by_id: dict[str, dict[str, Any]] = {}
+                        for resp in responses:
+                            if isinstance(resp, dict):
+                                resp_by_id[resp.get("id", "")] = resp
+                        # Merge request + response data
+                        network_entries = []
+                        for req in requests[:100]:
+                            if not isinstance(req, dict):
+                                continue
+                            req_id = req.get("id", "")
+                            resp = resp_by_id.get(req_id, {})
+                            network_entries.append({
+                                "url": req.get("url", ""),
+                                "method": req.get("method", ""),
+                                "status": resp.get("status", 0),
+                            })
+                    elif isinstance(network_result, list):
+                        network_entries = [
+                            {
+                                "url": e.get("url", "") if isinstance(e, dict) else "",
+                                "method": e.get("method", "") if isinstance(e, dict) else "",
+                                "status": e.get("status", 0) if isinstance(e, dict) else 0,
+                            }
+                            for e in network_result[:100]
+                        ]
+                    else:
+                        network_entries = []
+                    page_data["network_log"] = network_entries
 
-                    # Extract scripts
+                    # Extract scripts via JS evaluation
+                    # V2 SDK: use expression= param (shorthand for script + return_value=True)
                     try:
                         scripts_result = await browser.evaluate(
                             context_id=context_id,
-                            script="""
+                            expression="""
                             (() => {
                                 const scripts = document.querySelectorAll('script');
                                 return Array.from(scripts).map(s => s.textContent || '').filter(t => t.length > 0);
                             })()
                             """,
-                            return_value=True,
                         )
-                        result_value = scripts_result.get("result") if isinstance(scripts_result, dict) else scripts_result
-                        if isinstance(result_value, list):
-                            page_data["scripts"] = result_value
+                        if isinstance(scripts_result, list):
+                            page_data["scripts"] = scripts_result
+                        elif isinstance(scripts_result, dict):
+                            result_value = scripts_result.get("result", scripts_result.get("value"))
+                            if isinstance(result_value, list):
+                                page_data["scripts"] = result_value
                     except Exception:
                         pass
 
@@ -411,7 +454,7 @@ class ScanOrchestrator:
                     try:
                         forms_result = await browser.evaluate(
                             context_id=context_id,
-                            script="""
+                            expression="""
                             (() => {
                                 const forms = document.querySelectorAll('form');
                                 return Array.from(forms).map(form => ({
@@ -426,11 +469,13 @@ class ScanOrchestrator:
                                 }));
                             })()
                             """,
-                            return_value=True,
                         )
-                        result_value = forms_result.get("result") if isinstance(forms_result, dict) else forms_result
-                        if isinstance(result_value, list):
-                            page_data["forms"] = result_value
+                        if isinstance(forms_result, list):
+                            page_data["forms"] = forms_result
+                        elif isinstance(forms_result, dict):
+                            result_value = forms_result.get("result", forms_result.get("value"))
+                            if isinstance(result_value, list):
+                                page_data["forms"] = result_value
                     except Exception:
                         pass
 
@@ -445,7 +490,12 @@ class ScanOrchestrator:
                                     timeout=int(self.config.timeout * 1000),
                                 )
                                 cookies_result = await browser.get_cookies(context_id=extra_context_id)
-                                raw_cookies = cookies_result.get("cookies", []) if isinstance(cookies_result, dict) else []
+                                if isinstance(cookies_result, list):
+                                    raw_cookies = cookies_result
+                                elif isinstance(cookies_result, dict):
+                                    raw_cookies = cookies_result.get("cookies", [])
+                                else:
+                                    raw_cookies = []
                                 context_cookies = self._convert_cookies(raw_cookies)
                                 page_data["browser_contexts"].append({
                                     "context_id": i,

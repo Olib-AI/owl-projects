@@ -16,18 +16,13 @@ import asyncio
 import os
 import re
 import struct
-import sys
 import time
-from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx
 import structlog
 from dotenv import load_dotenv
-
-# Add python-sdk to path for owl_browser imports
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "python-sdk"))
 
 # Load environment variables
 load_dotenv()

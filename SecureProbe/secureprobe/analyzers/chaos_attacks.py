@@ -757,12 +757,14 @@ class ChaosAttacksAnalyzer(BaseAnalyzer):
 
                     eval_result = await browser.evaluate(
                         context_id=context_id,
-                        script=secrets_script,
-                        return_value=True,
+                        expression=secrets_script,
                     )
 
-                    # Extract result from SDK v2 response format
-                    result = eval_result.get("result") if isinstance(eval_result, dict) else eval_result
+                    # V2 SDK returns the JS value directly
+                    if isinstance(eval_result, dict) and "result" in eval_result:
+                        result = eval_result["result"]
+                    else:
+                        result = eval_result
 
                 if not isinstance(result, dict):
                     return findings
@@ -1676,7 +1678,12 @@ class ChaosAttacksAnalyzer(BaseAnalyzer):
 
                     # Get initial page state
                     html_result = await browser.get_html(context_id=context_id)
-                    initial_html = html_result.get("html", "") if isinstance(html_result, dict) else ""
+                    if isinstance(html_result, dict):
+                        initial_html = html_result.get("html", "")
+                    elif isinstance(html_result, str):
+                        initial_html = html_result
+                    else:
+                        initial_html = ""
 
                     # Konami code sequence: up, up, down, down, left, right, left, right, b, a
                     # Note: Only using arrow keys as letter keys require type_text() method
@@ -1693,7 +1700,12 @@ class ChaosAttacksAnalyzer(BaseAnalyzer):
                     # Wait and check for changes
                     await asyncio.sleep(0.5)
                     html_result = await browser.get_html(context_id=context_id)
-                    post_konami_html = html_result.get("html", "") if isinstance(html_result, dict) else ""
+                    if isinstance(html_result, dict):
+                        post_konami_html = html_result.get("html", "")
+                    elif isinstance(html_result, str):
+                        post_konami_html = html_result
+                    else:
+                        post_konami_html = ""
 
                     # Check for debug/admin panels appearing
                     debug_indicators = [
@@ -2800,12 +2812,14 @@ class ChaosAttacksAnalyzer(BaseAnalyzer):
 
                     eval_result = await browser.evaluate(
                         context_id=context_id,
-                        script=sw_check_script,
-                        return_value=True,
+                        expression=sw_check_script,
                     )
 
-                    # Extract result from SDK v2 response format
-                    result = eval_result.get("result") if isinstance(eval_result, dict) else eval_result
+                    # V2 SDK returns the JS value directly
+                    if isinstance(eval_result, dict) and "result" in eval_result:
+                        result = eval_result["result"]
+                    else:
+                        result = eval_result
 
                     if isinstance(result, dict):
                         if result.get("swScripts"):

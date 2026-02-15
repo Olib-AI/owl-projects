@@ -38,19 +38,21 @@ def get_browser_config() -> tuple[str, str]:
     """
     Get browser configuration from environment variables.
 
+    Reads OWL_ENDPOINT and OWL_TOKEN (V2 SDK convention).
+
     Returns:
         Tuple of (url, token) for browser connection.
 
     Raises:
         BrowserConfigError: If required environment variables are not set.
     """
-    remote_url = os.getenv("OWL_BROWSER_URL")
-    remote_token = os.getenv("OWL_BROWSER_TOKEN")
+    remote_url = os.getenv("OWL_ENDPOINT")
+    remote_token = os.getenv("OWL_TOKEN")
 
     if not remote_url or not remote_token:
         raise BrowserConfigError(
-            "OWL_BROWSER_URL and OWL_BROWSER_TOKEN environment variables are required. "
-            "SDK v2 requires remote browser connection."
+            "OWL_ENDPOINT and OWL_TOKEN environment variables are required. "
+            "Set these in your .env file for Owl Browser SDK v2 connection."
         )
 
     return remote_url, remote_token
@@ -62,6 +64,8 @@ async def get_browser() -> AsyncIterator["OwlBrowser"]:
     Async context manager for browser instance.
 
     Creates and manages an OwlBrowser instance with proper lifecycle management.
+    Reads OWL_API_PREFIX env var for API prefix (defaults to SDK default "/api").
+    Set OWL_API_PREFIX="" for direct connections without nginx proxy.
 
     Yields:
         Connected OwlBrowser instance.
@@ -86,7 +90,13 @@ async def get_browser() -> AsyncIterator["OwlBrowser"]:
         has_token=bool(token),
     )
 
-    config = RemoteConfig(url=url, token=token, api_prefix="")
+    # Build config kwargs; only pass api_prefix if explicitly set via env
+    config_kwargs: dict[str, Any] = {"url": url, "token": token}
+    api_prefix = os.getenv("OWL_API_PREFIX")
+    if api_prefix is not None:
+        config_kwargs["api_prefix"] = api_prefix
+
+    config = RemoteConfig(**config_kwargs)
     async with OwlBrowser(config) as browser:
         yield browser
 

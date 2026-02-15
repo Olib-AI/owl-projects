@@ -124,6 +124,11 @@ def _build_styles() -> dict[str, ParagraphStyle]:
             fontSize=30, leading=36, textColor=NIGHT,
             fontName="Helvetica-Bold", spaceAfter=2,
         ),
+        "subtitle_large": ParagraphStyle(
+            "OwlSubtitleLarge", parent=base["Title"],
+            fontSize=18, leading=22, textColor=TEXT_MUTED,
+            fontName="Helvetica", spaceAfter=2,
+        ),
         "subtitle": ParagraphStyle(
             "OwlSubtitle", parent=base["Normal"],
             fontSize=12, leading=16, textColor=TEXT_MUTED,
@@ -621,7 +626,9 @@ def generate_report(result: StressTestResult, output_path: str) -> str:
         story.append(Image(str(logo_path), width=32 * mm, height=32 * mm))
         story.append(Spacer(1, 6 * mm))
 
-    story.append(Paragraph("Stress Test Report", styles["title"]))
+    story.append(Paragraph("Owl Browser", styles["title"]))
+    story.append(Spacer(1, 2 * mm))
+    story.append(Paragraph("Stress Test Report", styles["subtitle_large"]))
     story.append(Spacer(1, 6 * mm))
     story.append(Paragraph(
         f"{result.target_name}  &bull;  {datetime.datetime.now().strftime('%B %d, %Y')}",
