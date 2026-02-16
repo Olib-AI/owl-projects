@@ -108,25 +108,31 @@ tests:
 
 @pytest.fixture
 def mock_browser() -> MagicMock:
-    """Create a mock browser instance."""
-    browser = MagicMock()
-    page = MagicMock()
+    """Create a mock OwlBrowser instance (SDK v2)."""
+    import asyncio
 
-    browser.new_page.return_value = page
-    page.goto.return_value = None
-    page.click.return_value = None
-    page.type.return_value = None
-    page.is_visible.return_value = True
-    page.is_enabled.return_value = True
-    page.extract_text.return_value = "Sample text"
-    page.screenshot.return_value = b"fake_image_data"
-    page.get_network_log.return_value = []
-    page.get_console_log.return_value = []
+    browser = MagicMock()
+
+    # SDK v2: create_context returns a dict with context_id
+    async def mock_create_context():
+        return {"context_id": "test-ctx-001"}
+
+    browser.create_context = MagicMock(side_effect=mock_create_context)
+    browser.close_context = MagicMock(return_value=asyncio.coroutine(lambda **kw: None)())
+
+    # SDK v2: all methods are async and take context_id
+    browser.navigate = MagicMock(return_value=asyncio.coroutine(lambda **kw: None)())
+    browser.click = MagicMock(return_value=asyncio.coroutine(lambda **kw: None)())
+    browser.type = MagicMock(return_value=asyncio.coroutine(lambda **kw: None)())
+    browser.is_visible = MagicMock(return_value=asyncio.coroutine(lambda **kw: {"success": True})())
+    browser.is_enabled = MagicMock(return_value=asyncio.coroutine(lambda **kw: {"success": True})())
+    browser.extract_text = MagicMock(return_value=asyncio.coroutine(lambda **kw: {"text": "Sample text"})())
+    browser.screenshot = MagicMock(return_value=asyncio.coroutine(lambda **kw: {"data": ""})())
+    browser.get_network_log = MagicMock(return_value=asyncio.coroutine(lambda **kw: {"entries": []})())
+    browser.get_console_log = MagicMock(return_value=asyncio.coroutine(lambda **kw: [])())
+    browser.wait_for_selector = MagicMock(return_value=asyncio.coroutine(lambda **kw: None)())
+    browser.wait_for_network_idle = MagicMock(return_value=asyncio.coroutine(lambda **kw: None)())
+    browser.evaluate = MagicMock(return_value=asyncio.coroutine(lambda **kw: None)())
+    browser.get_page_info = MagicMock(return_value=asyncio.coroutine(lambda **kw: {"url": "https://example.com"})())
 
     return browser
-
-
-@pytest.fixture
-def mock_page(mock_browser: MagicMock) -> MagicMock:
-    """Get mock page from mock browser."""
-    return mock_browser.new_page()

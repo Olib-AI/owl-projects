@@ -333,6 +333,17 @@ def create_parser() -> argparse.ArgumentParser:
         metavar="PATTERN",
         help="Regex pattern for URLs to include (can be repeated)",
     )
+    build_parser.add_argument(
+        "--selector-strategy",
+        choices=["semantic", "css"],
+        default="semantic",
+        help="Selector strategy: 'semantic' (natural language, default) or 'css' (CSS selectors)",
+    )
+    build_parser.add_argument(
+        "--vision",
+        action="store_true",
+        help="Use vision model to enhance page analysis (requires LLM config with vision-capable model)",
+    )
     build_parser.set_defaults(func=cmd_build)
 
     return parser
@@ -877,6 +888,8 @@ async def _cmd_build_async(args: argparse.Namespace) -> int:
             timeout_ms=args.timeout,
             exclude_patterns=args.exclude_patterns,
             include_patterns=args.include_patterns,
+            selector_strategy=args.selector_strategy,
+            enable_vision=args.vision,
         )
 
         # Run the builder

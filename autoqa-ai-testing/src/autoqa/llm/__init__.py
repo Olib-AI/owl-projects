@@ -51,6 +51,12 @@ from autoqa.llm.service import (
     get_llm_service,
     shutdown_llm_service,
 )
+from autoqa.llm.vision import (
+    VisionAnalysisResult,
+    VisionAnalyzer,
+    VisionElement,
+    is_vision_capable,
+)
 
 __all__ = [
     # Config
@@ -89,4 +95,9 @@ __all__ = [
     "LLMAssertionEngine",
     "LLMAssertionError",
     "LLMAssertionResult",
+    # Vision
+    "VisionAnalysisResult",
+    "VisionAnalyzer",
+    "VisionElement",
+    "is_vision_capable",
 ]

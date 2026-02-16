@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 import structlog
 
 if TYPE_CHECKING:
-    from owl_browser import BrowserContext
+    from owl_browser import OwlBrowser
 
 logger = structlog.get_logger(__name__)
 
@@ -269,12 +269,13 @@ class StateManager:
         """Get the current application state."""
         return self._current_state
 
-    async def capture_state(self, page: BrowserContext) -> ApplicationState:
+    async def capture_state(self, browser: "OwlBrowser", context_id: str) -> ApplicationState:
         """
         Capture the current application state.
 
         Args:
-            page: Browser context to capture state from
+            browser: OwlBrowser instance
+            context_id: Browser context identifier
 
         Returns:
             ApplicationState snapshot
@@ -282,18 +283,21 @@ class StateManager:
         self._log.debug("Capturing application state")
 
         # Capture storage state
-        storage_state = await self._capture_storage_state(page)
+        storage_state = await self._capture_storage_state(browser, context_id)
 
         # Capture DOM state
-        dom_state = await self._capture_dom_state(page)
+        dom_state = await self._capture_dom_state(browser, context_id)
 
         # Generate state ID
         self._state_counter += 1
         state_id = f"state_{self._state_counter}_{storage_state.get_hash()}_{dom_state.get_hash()}"
 
+        page_info = await browser.get_page_info(context_id=context_id)
+        current_url = page_info.get("url", "")
+
         state = ApplicationState(
             state_id=state_id,
-            url=page.get_current_url(),
+            url=current_url,
             storage_state=storage_state,
             dom_state=dom_state,
             timestamp=datetime.now(UTC),
@@ -318,7 +322,7 @@ class StateManager:
 
         return state
 
-    async def _capture_storage_state(self, page: BrowserContext) -> StorageState:
+    async def _capture_storage_state(self, browser: "OwlBrowser", context_id: str) -> StorageState:
         """Capture browser storage state."""
         script = """
         (() => {
@@ -355,7 +359,7 @@ class StateManager:
         })()
         """
 
-        storage = page.expression(script)
+        storage = await browser.evaluate(context_id=context_id, expression=script)
 
         # Get cookies via JavaScript (limited to accessible cookies)
         cookies_script = """
@@ -371,7 +375,7 @@ class StateManager:
         })()
         """
 
-        cookies = page.expression(cookies_script)
+        cookies = await browser.evaluate(context_id=context_id, expression=cookies_script)
 
         return StorageState(
             local_storage=storage.get("localStorage", {}),
@@ -379,7 +383,7 @@ class StateManager:
             cookies=cookies,
         )
 
-    async def _capture_dom_state(self, page: BrowserContext) -> DOMState:
+    async def _capture_dom_state(self, browser: "OwlBrowser", context_id: str) -> DOMState:
         """Capture DOM state snapshot."""
         script = """
         (() => {
@@ -414,7 +418,7 @@ class StateManager:
         })()
         """
 
-        dom_data = page.expression(script)
+        dom_data = await browser.evaluate(context_id=context_id, expression=script)
 
         # Create proper hash for visible text
         visible_text_hash = hashlib.md5(
@@ -433,7 +437,8 @@ class StateManager:
 
     async def record_transition(
         self,
-        page: BrowserContext,
+        browser: "OwlBrowser",
+        context_id: str,
         action: str,
         selector: str | None = None,
         change_type: StateChangeType = StateChangeType.UNKNOWN,
@@ -442,7 +447,8 @@ class StateManager:
         Record a state transition after an action.
 
         Args:
-            page: Browser context after action
+            browser: OwlBrowser instance
+            context_id: Browser context identifier
             action: Action that triggered the transition
             selector: Selector of element that was interacted with
             change_type: Type of state change
@@ -457,7 +463,7 @@ class StateManager:
         from_state = self._current_state
 
         # Capture new state
-        new_state = await self.capture_state(page)
+        new_state = await self.capture_state(browser, context_id)
 
         # Check if state actually changed
         if new_state.get_hash() == from_state.get_hash():

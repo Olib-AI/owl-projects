@@ -7,6 +7,7 @@ date-based organization and efficient querying.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import re
@@ -75,11 +76,12 @@ class TestRunHistory:
         """Get the storage path."""
         return self._storage_path
 
-    def save_snapshot(
+    async def save_snapshot(
         self,
         test_name: str,
         run_data: TestRunResult,
-        page: Any | None = None,
+        browser: Any | None = None,
+        context_id: str | None = None,
         additional_data: dict[str, Any] | None = None,
     ) -> TestSnapshot:
         """
@@ -88,7 +90,8 @@ class TestRunHistory:
         Args:
             test_name: Name of the test
             run_data: Test run result data
-            page: Browser page for capturing additional state (optional)
+            browser: OwlBrowser instance for capturing additional state (optional)
+            context_id: Browser context identifier (required if browser is provided)
             additional_data: Extra data to include in snapshot
 
         Returns:
@@ -112,19 +115,25 @@ class TestRunHistory:
         test_dir = self._get_test_dir(test_name)
         version_dir = test_dir / timestamp.strftime(self.DATE_FORMAT)
 
+        has_browser = browser is not None and context_id is not None
+
         try:
             version_dir.mkdir(parents=True, exist_ok=True)
 
-            # Capture screenshot if page is available
-            if page is not None and self._config.capture_screenshots:
-                screenshot_path = self._capture_screenshot(page, version_dir)
+            # Capture screenshot if browser is available
+            if has_browser and self._config.capture_screenshots:
+                screenshot_path = await self._capture_screenshot(
+                    browser, context_id, version_dir  # type: ignore[arg-type]
+                )
                 if screenshot_path:
                     snapshot.screenshot_path = str(screenshot_path)
                     snapshot.screenshot_hash = self._compute_file_hash(screenshot_path)
 
-            # Capture page state if page is available
-            if page is not None:
-                self._capture_page_state(page, snapshot)
+            # Capture page state if browser is available
+            if has_browser:
+                await self._capture_page_state(
+                    browser, context_id, snapshot  # type: ignore[arg-type]
+                )
 
             # Capture network requests from run data
             if self._config.capture_network and run_data.network_log:
@@ -134,9 +143,9 @@ class TestRunHistory:
                 ]
 
             # Capture element states if configured
-            if page is not None and self._config.capture_elements:
-                snapshot.element_states = self._capture_element_states(
-                    page, self._config.element_selectors
+            if has_browser and self._config.capture_elements:
+                snapshot.element_states = await self._capture_element_states(
+                    browser, context_id, self._config.element_selectors  # type: ignore[arg-type]
                 )
 
             # Add additional data
@@ -426,33 +435,58 @@ class TestRunHistory:
             )
             return None
 
-    def _capture_screenshot(self, page: Any, version_dir: Path) -> Path | None:
-        """Capture screenshot from page."""
+    async def _capture_screenshot(
+        self, browser: Any, context_id: str, version_dir: Path
+    ) -> Path | None:
+        """Capture screenshot from browser context."""
         try:
             screenshot_path = version_dir / "screenshot.png"
-            page.screenshot(str(screenshot_path))
+            result = await browser.screenshot(context_id=context_id)
+            if isinstance(result, dict):
+                b64_data = result.get("data", result.get("screenshot", ""))
+            else:
+                b64_data = result
+            screenshot_path.write_bytes(base64.b64decode(b64_data))
             return screenshot_path
         except Exception as e:
             self._log.warning("Failed to capture screenshot", error=str(e))
             return None
 
-    def _capture_page_state(self, page: Any, snapshot: TestSnapshot) -> None:
-        """Capture page state (title, URL) from page."""
+    async def _capture_page_state(
+        self, browser: Any, context_id: str, snapshot: TestSnapshot
+    ) -> None:
+        """Capture page state (title, URL) from browser context."""
         try:
-            snapshot.page_title = page.title() if hasattr(page, "title") else None
-            snapshot.page_url = page.url() if hasattr(page, "url") else None
+            title_result = await browser.evaluate(
+                context_id=context_id, expression="document.title"
+            )
+            snapshot.page_title = (
+                title_result.get("result", title_result.get("value"))
+                if isinstance(title_result, dict)
+                else str(title_result)
+            )
         except Exception as e:
-            self._log.debug("Failed to capture page state", error=str(e))
+            self._log.debug("Failed to capture page title", error=str(e))
 
-    def _capture_element_states(
-        self, page: Any, selectors: list[str]
+        try:
+            page_info = await browser.get_page_info(context_id=context_id)
+            snapshot.page_url = (
+                page_info.get("url") if isinstance(page_info, dict) else None
+            )
+        except Exception as e:
+            self._log.debug("Failed to capture page URL", error=str(e))
+
+    async def _capture_element_states(
+        self, browser: Any, context_id: str, selectors: list[str]
     ) -> list[ElementState]:
         """Capture element states for configured selectors."""
         states: list[ElementState] = []
 
         for selector in selectors:
             try:
-                state = self._capture_single_element_state(page, selector)
+                state = await self._capture_single_element_state(
+                    browser, context_id, selector
+                )
                 if state:
                     states.append(state)
             except Exception as e:
@@ -464,31 +498,61 @@ class TestRunHistory:
 
         return states
 
-    def _capture_single_element_state(
-        self, page: Any, selector: str
+    async def _capture_single_element_state(
+        self, browser: Any, context_id: str, selector: str
     ) -> ElementState | None:
         """Capture state of a single element."""
         try:
-            # This is a placeholder - actual implementation depends on browser API
-            is_visible = page.is_visible(selector) if hasattr(page, "is_visible") else True
-            is_enabled = page.is_enabled(selector) if hasattr(page, "is_enabled") else True
+            # Visibility
+            vis_result = await browser.is_visible(
+                context_id=context_id, selector=selector
+            )
+            is_visible = (
+                vis_result.get("visible", vis_result.get("result", True))
+                if isinstance(vis_result, dict)
+                else bool(vis_result)
+            )
 
-            # Try to get bounding box
+            # Enabled state
+            en_result = await browser.is_enabled(
+                context_id=context_id, selector=selector
+            )
+            is_enabled = (
+                en_result.get("enabled", en_result.get("result", True))
+                if isinstance(en_result, dict)
+                else bool(en_result)
+            )
+
+            # Bounding box
             bbox: BoundingBox | None = None
-            if hasattr(page, "get_bounding_box"):
-                box_data = page.get_bounding_box(selector)
+            try:
+                box_data = await browser.get_bounding_box(
+                    context_id=context_id, selector=selector
+                )
                 if box_data:
-                    bbox = BoundingBox(
-                        x=int(box_data.get("x", 0)),
-                        y=int(box_data.get("y", 0)),
-                        width=int(box_data.get("width", 0)),
-                        height=int(box_data.get("height", 0)),
-                    )
+                    if isinstance(box_data, dict):
+                        bbox = BoundingBox(
+                            x=int(box_data.get("x", 0)),
+                            y=int(box_data.get("y", 0)),
+                            width=int(box_data.get("width", 0)),
+                            height=int(box_data.get("height", 0)),
+                        )
+            except Exception:
+                pass
 
-            # Try to get text content
-            text_content = None
-            if hasattr(page, "extract_text"):
-                text_content = page.extract_text(selector)
+            # Text content
+            text_content: str | None = None
+            try:
+                text_result = await browser.extract_text(
+                    context_id=context_id, selector=selector
+                )
+                text_content = (
+                    text_result.get("text")
+                    if isinstance(text_result, dict)
+                    else text_result
+                )
+            except Exception:
+                pass
 
             return ElementState(
                 selector=selector,

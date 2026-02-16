@@ -172,6 +172,10 @@ class BuilderConfig:
     max_assertions_per_page: int = 50  # Maximum assertions per page (was 15)
     max_form_inputs: int = 30  # Maximum form inputs to fill (was 10)
     generate_comprehensive_assertions: bool = True  # Enabled: generates value verification steps
+    # Selector strategy: "semantic" uses natural language descriptions, "css" uses CSS selectors
+    selector_strategy: str = "semantic"
+    # Vision enhancement: use vision model to enrich page analysis
+    enable_vision: bool = False
 
 
 class AutoTestBuilder:
@@ -284,6 +288,23 @@ class AutoTestBuilder:
         if config.use_visibility_first:
             from autoqa.builder.discovery import VisibilityAnalyzer
             self._visibility_analyzer = VisibilityAnalyzer()
+
+        # Vision enhancement tracking
+        self._vision_enhanced: bool = False
+
+    def _get_selector_for_yaml(self, element: ElementInfo) -> str:
+        """Return the appropriate selector for YAML output based on strategy.
+
+        When strategy is "semantic", uses the element's semantic_description
+        (natural language) for more readable and resilient selectors.
+        Falls back to CSS if the description is too generic.
+        """
+        if self._config.selector_strategy == "semantic":
+            desc = element.semantic_description
+            # Fall back to CSS if description is too generic
+            if desc and desc not in ("button", "link", "checkbox", "radio button", "dropdown"):
+                return desc
+        return element.selector
 
     async def build(self) -> str:
         """
@@ -547,13 +568,166 @@ class AutoTestBuilder:
         """Perform complete analysis of current page."""
         # FIX 1: Use visibility-first analysis when enabled
         if self._visibility_analyzer and self._config.use_visibility_first:
-            return await self._visibility_first_analyze_page(context_id)
+            analysis = await self._visibility_first_analyze_page(context_id)
+        elif self._intelligent_builder:
+            analysis = await self._intelligent_analyze_page(context_id)
+        else:
+            analysis = await self._legacy_analyze_page(context_id)
 
-        # Use intelligent discovery if enabled
-        if self._intelligent_builder:
-            return await self._intelligent_analyze_page(context_id)
+        # Vision enhancement pass (additive, never replaces DOM analysis)
+        if self._config.enable_vision:
+            await self._enhance_with_vision(context_id, analysis)
 
-        return await self._legacy_analyze_page(context_id)
+        return analysis
+
+    async def _enhance_with_vision(
+        self, context_id: str, analysis: PageAnalysis,
+    ) -> None:
+        """Enhance page analysis with vision model insights.
+
+        Takes a screenshot, sends it to a vision-capable LLM, and merges
+        the results into the existing DOM-based analysis. Fails gracefully
+        -- if anything goes wrong, the original analysis is unchanged.
+        """
+        try:
+            from autoqa.llm.service import get_llm_service
+
+            llm_service = get_llm_service()
+
+            # Take screenshot (viewport only — not fullpage — for vision analysis)
+            screenshot_result = await self._browser.screenshot(
+                context_id=context_id, mode="viewport",
+            )
+            if not screenshot_result:
+                self._log.debug("Vision: no screenshot data returned")
+                return
+
+            # Extract base64 data from screenshot result
+            if isinstance(screenshot_result, dict):
+                screenshot_data = screenshot_result.get("data", "")
+            elif isinstance(screenshot_result, (str, bytes)):
+                screenshot_data = screenshot_result
+            else:
+                self._log.debug("Vision: unexpected screenshot format")
+                return
+
+            if not screenshot_data:
+                return
+
+            vision_result = await llm_service.analyze_page_screenshot(
+                screenshot_data=screenshot_data,
+                enable_vision_override=self._config.enable_vision,
+            )
+
+            if vision_result is not None:
+                self._merge_vision_results(analysis, vision_result)
+                self._vision_enhanced = True
+                self._log.info(
+                    "Vision enhancement applied",
+                    url=analysis.url,
+                    vision_elements=len(vision_result.detected_elements),
+                    confidence=vision_result.confidence,
+                )
+
+        except Exception as e:
+            # Graceful fallback: log and continue with DOM-only analysis
+            self._log.warning("Vision enhancement failed, continuing with DOM-only", error=str(e))
+
+    def _merge_vision_results(
+        self,
+        analysis: PageAnalysis,
+        vision_result: "VisionAnalysisResult",
+    ) -> None:
+        """Merge vision analysis results into existing DOM-based PageAnalysis.
+
+        Strategy:
+        - Enrich semantic_description of matching DOM elements with richer
+          vision descriptions.
+        - Add high-confidence (>= 0.7) vision-only elements not found in DOM.
+        - Enhance form detection from vision form groups.
+        - Discard vision results with confidence < 0.3.
+
+        Matching uses element type + approximate text similarity.
+        """
+        from autoqa.llm.vision import VisionAnalysisResult
+
+        if not isinstance(vision_result, VisionAnalysisResult):
+            return
+
+        # Build a lookup of existing elements by type for matching
+        existing_by_type: dict[str, list[ElementInfo]] = {}
+        for elem in analysis.elements:
+            etype = elem.element_type.value
+            existing_by_type.setdefault(etype, []).append(elem)
+
+        # Map vision element_type values to ElementType values
+        vision_type_map: dict[str, str] = {
+            "button": "button",
+            "link": "link",
+            "input": "input_text",
+            "select": "select",
+            "checkbox": "checkbox",
+            "radio": "radio",
+            "form": "form",
+            "textarea": "textarea",
+        }
+
+        for ve in vision_result.detected_elements:
+            # Skip low-confidence detections
+            if ve.confidence < 0.3:
+                continue
+
+            mapped_type = vision_type_map.get(ve.element_type)
+
+            # Try to find a matching DOM element
+            matched = False
+            if mapped_type and mapped_type in existing_by_type:
+                for existing in existing_by_type[mapped_type]:
+                    # Match by text similarity
+                    existing_text = (existing.text_content or existing.semantic_description or "").lower()
+                    vision_text = ve.description.lower()
+                    if existing_text and vision_text and (
+                        existing_text in vision_text or vision_text in existing_text
+                    ):
+                        # Enrich with vision description
+                        if len(ve.description) > len(existing.semantic_description):
+                            existing.semantic_description = ve.description
+                        matched = True
+                        break
+
+            # Add vision-only elements with high confidence
+            if not matched and ve.confidence >= 0.7 and mapped_type:
+                try:
+                    element_type = ElementType(mapped_type)
+                except ValueError:
+                    continue
+
+                new_element = ElementInfo(
+                    element_type=element_type,
+                    selector=f"text={ve.description[:80]}",
+                    semantic_description=ve.description,
+                    text_content=ve.description,
+                    is_visible=True,
+                    reliability_score=ve.confidence * 0.8,  # Discount vs DOM
+                )
+                analysis.elements.append(new_element)
+
+        # Enhance form detection from vision form groups
+        for fg in vision_result.form_groups:
+            form_name = fg.get("name", "")
+            # Check if we already have this form
+            already_exists = any(
+                f.get("name", "").lower() == form_name.lower()
+                for f in analysis.forms
+                if form_name
+            )
+            if not already_exists and form_name:
+                analysis.forms.append({
+                    "name": form_name,
+                    "fields": fg.get("fields", []),
+                    "submit_label": fg.get("submit_label", ""),
+                    "source": "vision",
+                })
 
     async def _visibility_first_analyze_page(self, context_id: str) -> PageAnalysis:
         """
@@ -657,6 +831,7 @@ class AutoTestBuilder:
                         "reveals_selector": trigger.reveals_elements[0] if trigger.reveals_elements else None,
                         "all_reveals": trigger.reveals_elements,
                         "trigger_text": trigger.text_content,
+                        "trigger_semantic": trigger.text_content or trigger.selector,
                     }
                     analysis.forms.append(flow_info)
 
@@ -972,7 +1147,7 @@ class AutoTestBuilder:
             element_selector = raw.get("selector") or raw.get("css_selector")
             if not element_selector:
                 # Fall back to generating our own selector
-                element_selector = self._generate_semantic_selector(
+                element_selector = self._generate_css_selector(
                     raw, element_type, text_counts=text_counts
                 )
 
@@ -1394,7 +1569,7 @@ class AutoTestBuilder:
 
                 semantic_desc = self._generate_semantic_description(raw, element_type)
                 # Pass text_counts and raw_elements to selector generator for uniqueness-aware generation
-                element_selector = self._generate_semantic_selector(
+                element_selector = self._generate_css_selector(
                     raw, element_type, text_counts=text_counts, all_elements=raw_elements
                 )
 
@@ -1563,7 +1738,7 @@ class AutoTestBuilder:
                     continue
 
                 semantic_desc = self._generate_semantic_description(raw, element_type)
-                element_selector = self._generate_semantic_selector(raw, element_type)
+                element_selector = self._generate_css_selector(raw, element_type)
 
                 elements.append(ElementInfo(
                     element_type=element_type,
@@ -1642,7 +1817,7 @@ class AutoTestBuilder:
 
         return " ".join(parts) if parts else f"unnamed {element_type.value}"
 
-    def _generate_semantic_selector(
+    def _generate_css_selector(
         self,
         raw: dict[str, Any],
         element_type: ElementType,  # noqa: ARG002
@@ -2008,6 +2183,9 @@ class AutoTestBuilder:
             "username_selector": username_candidates[0].selector,
             "password_selector": password_candidates[0].selector,
             "submit_selector": submit_candidates[0].selector if submit_candidates else None,
+            "username_semantic": username_candidates[0].semantic_description,
+            "password_semantic": password_candidates[0].semantic_description,
+            "submit_semantic": submit_candidates[0].semantic_description if submit_candidates else None,
             "is_likely_login": url_has_login or bool(submit_candidates),
         }
 
@@ -2108,6 +2286,7 @@ class AutoTestBuilder:
         )
 
         # Add header comment
+        selector_label = "semantic (natural language)" if self._config.selector_strategy == "semantic" else "CSS"
         header = f"""# Auto-generated test specification (VISIBILITY-FIRST)
 # Generated: {datetime.now(UTC).isoformat()}
 # URL: {self._config.url}
@@ -2115,6 +2294,8 @@ class AutoTestBuilder:
 # Total visible elements discovered: {sum(len(p.elements) for p in self._page_analyses)}
 # Shared navigation elements excluded: {shared_count}
 # Total test steps: {self._total_step_count}
+# Selector strategy: {selector_label}
+# Vision-enhanced: {"yes" if self._vision_enhanced else "no"}
 #
 # VISIBILITY-FIRST TESTING:
 # - ONLY visible elements are tested directly
@@ -2180,25 +2361,35 @@ class AutoTestBuilder:
 
         login_info = self._captured_login_info
 
+        # Choose selector based on strategy
+        if self._config.selector_strategy == "semantic":
+            username_sel = login_info.get("username_semantic") or login_info["username_selector"]
+            password_sel = login_info.get("password_semantic") or login_info["password_selector"]
+            submit_sel = login_info.get("submit_semantic") or login_info.get("submit_selector")
+        else:
+            username_sel = login_info["username_selector"]
+            password_sel = login_info["password_selector"]
+            submit_sel = login_info.get("submit_selector")
+
         steps.append({
             "name": "Enter username",
             "action": "type",
-            "selector": login_info["username_selector"],
+            "selector": username_sel,
             "text": "${username}",
         })
 
         steps.append({
             "name": "Enter password",
             "action": "type",
-            "selector": login_info["password_selector"],
+            "selector": password_sel,
             "text": "${password}",
         })
 
-        if login_info.get("submit_selector"):
+        if submit_sel:
             steps.append({
                 "name": "Click login button",
                 "action": "click",
-                "selector": login_info["submit_selector"],
+                "selector": submit_sel,
                 "timeout": 5000,
             })
         else:
@@ -2351,11 +2542,12 @@ class AutoTestBuilder:
                 continue
 
             # Test button visibility first
+            btn_yaml_selector = self._get_selector_for_yaml(button)
             steps.append({
                 "name": f"Verify visible - {self._sanitize_step_name(button.semantic_description[:40])}",
                 "action": "assert",
                 "assertion": {
-                    "selector": button.selector,
+                    "selector": btn_yaml_selector,
                     "operator": "is_visible",
                     "timeout": 3000,
                 },
@@ -2372,7 +2564,7 @@ class AutoTestBuilder:
                 steps.append({
                     "name": f"Click - {self._sanitize_step_name(button.semantic_description[:40])}",
                     "action": "click",
-                    "selector": button.selector,
+                    "selector": btn_yaml_selector,
                     "timeout": 3000,
                     "continue_on_failure": True,
                 })
@@ -2403,7 +2595,7 @@ class AutoTestBuilder:
                 "name": f"Verify link - {self._sanitize_step_name(link.semantic_description[:40])}",
                 "action": "assert",
                 "assertion": {
-                    "selector": link.selector,
+                    "selector": self._get_selector_for_yaml(link),
                     "operator": "is_visible",
                     "timeout": 3000,
                 },
@@ -2453,13 +2645,14 @@ class AutoTestBuilder:
         """
         sample_text = self._generate_sample_input(element)
         desc = self._sanitize_step_name(element.semantic_description[:40])
+        yaml_selector = self._get_selector_for_yaml(element)
 
         # For checkboxes, just click
         if element.element_type == ElementType.INPUT_CHECKBOX:
             return {
                 "name": f"Toggle - {desc}",
                 "action": "click",
-                "selector": element.selector,
+                "selector": yaml_selector,
                 "timeout": 3000,
                 "continue_on_failure": True,
             }
@@ -2473,7 +2666,7 @@ class AutoTestBuilder:
             return {
                 "name": f"Select - {desc}",
                 "action": "pick",
-                "selector": element.selector,
+                "selector": yaml_selector,
                 "value": select_value,
                 "timeout": 3000,
                 "continue_on_failure": True,
@@ -2483,7 +2676,7 @@ class AutoTestBuilder:
         return {
             "name": f"Fill - {desc}",
             "action": "type",
-            "selector": element.selector,
+            "selector": yaml_selector,
             "text": sample_text,
             "timeout": 3000,
             "continue_on_failure": True,
@@ -2504,11 +2697,18 @@ class AutoTestBuilder:
         if not trigger_selector:
             return steps
 
+        # Use semantic selector for trigger click when strategy is semantic
+        if self._config.selector_strategy == "semantic":
+            trigger_semantic = flow.get("trigger_semantic") or flow.get("trigger_text")
+            click_selector = trigger_semantic if trigger_semantic else trigger_selector
+        else:
+            click_selector = trigger_selector
+
         # Step 1: Click trigger to open content
         steps.append({
             "name": f"Open - {self._sanitize_step_name(trigger_text[:30])}",
             "action": "click",
-            "selector": trigger_selector,
+            "selector": click_selector,
             "timeout": 3000,
         })
 
@@ -2865,13 +3065,14 @@ class AutoTestBuilder:
         steps: list[dict[str, Any]] = []
         sample_text = self._generate_sample_input(element)
         desc = self._sanitize_step_name(element.semantic_description[:40])
+        yaml_selector = self._get_selector_for_yaml(element)
 
         # Step 1: Verify input is visible
         step_visibility: dict[str, Any] = {
             "name": f"Verify visible - {desc}",
             "action": "assert",
             "assertion": {
-                "selector": element.selector,
+                "selector": yaml_selector,
                 "operator": "is_visible",
                 "timeout": 5000,
             },
@@ -2885,7 +3086,7 @@ class AutoTestBuilder:
         step_type: dict[str, Any] = {
             "name": f"Fill - {desc}",
             "action": "type",
-            "selector": element.selector,
+            "selector": yaml_selector,
             "text": sample_text,
             "continue_on_failure": True,
         }
@@ -2899,7 +3100,7 @@ class AutoTestBuilder:
                 "name": f"Verify value - {desc}",
                 "action": "assert",
                 "assertion": {
-                    "selector": element.selector,
+                    "selector": yaml_selector,
                     "operator": "attribute_equals",
                     "attribute": "value",
                     "expected": sample_text,
@@ -2928,13 +3129,14 @@ class AutoTestBuilder:
         """
         steps: list[dict[str, Any]] = []
         desc = self._sanitize_step_name(element.semantic_description[:40])
+        yaml_selector = self._get_selector_for_yaml(element)
 
         # Step 1: Verify checkbox is visible
         step_visibility: dict[str, Any] = {
             "name": f"Verify visible - {desc}",
             "action": "assert",
             "assertion": {
-                "selector": element.selector,
+                "selector": yaml_selector,
                 "operator": "is_visible",
                 "timeout": 5000,
             },
@@ -2948,7 +3150,7 @@ class AutoTestBuilder:
         step_click: dict[str, Any] = {
             "name": f"Toggle - {desc}",
             "action": "click",
-            "selector": element.selector,
+            "selector": yaml_selector,
             "timeout": 5000,
             "continue_on_failure": True,
         }
@@ -2962,7 +3164,7 @@ class AutoTestBuilder:
                 "name": f"Verify checked - {desc}",
                 "action": "assert",
                 "assertion": {
-                    "selector": element.selector,
+                    "selector": yaml_selector,
                     "operator": "is_checked",
                     "timeout": 5000,
                 },
@@ -2989,13 +3191,14 @@ class AutoTestBuilder:
         """
         steps: list[dict[str, Any]] = []
         desc = self._sanitize_step_name(element.semantic_description[:40])
+        yaml_selector = self._get_selector_for_yaml(element)
 
         # Step 1: Verify radio is visible
         step_visibility: dict[str, Any] = {
             "name": f"Verify visible - {desc}",
             "action": "assert",
             "assertion": {
-                "selector": element.selector,
+                "selector": yaml_selector,
                 "operator": "is_visible",
                 "timeout": 5000,
             },
@@ -3009,7 +3212,7 @@ class AutoTestBuilder:
         step_click: dict[str, Any] = {
             "name": f"Select - {desc}",
             "action": "click",
-            "selector": element.selector,
+            "selector": yaml_selector,
             "timeout": 5000,
             "continue_on_failure": True,
         }
@@ -3023,7 +3226,7 @@ class AutoTestBuilder:
                 "name": f"Verify selected - {desc}",
                 "action": "assert",
                 "assertion": {
-                    "selector": element.selector,
+                    "selector": yaml_selector,
                     "operator": "is_checked",
                     "timeout": 5000,
                 },
@@ -3050,13 +3253,14 @@ class AutoTestBuilder:
         """
         steps: list[dict[str, Any]] = []
         desc = self._sanitize_step_name(element.semantic_description[:40])
+        yaml_selector = self._get_selector_for_yaml(element)
 
         # Step 1: Verify select is visible
         step_visibility: dict[str, Any] = {
             "name": f"Verify visible - {desc}",
             "action": "assert",
             "assertion": {
-                "selector": element.selector,
+                "selector": yaml_selector,
                 "operator": "is_visible",
                 "timeout": 5000,
             },
@@ -3075,7 +3279,7 @@ class AutoTestBuilder:
             step_select: dict[str, Any] = {
                 "name": f"Select option - {desc}",
                 "action": "pick",
-                "selector": element.selector,
+                "selector": yaml_selector,
                 "value": selected_value,
                 "timeout": 5000,
                 "continue_on_failure": True,
@@ -3085,7 +3289,7 @@ class AutoTestBuilder:
             step_select = {
                 "name": f"Select option - {desc}",
                 "action": "pick",
-                "selector": element.selector,
+                "selector": yaml_selector,
                 "value": "1",  # Default fallback value
                 "timeout": 5000,
                 "continue_on_failure": True,
@@ -3100,7 +3304,7 @@ class AutoTestBuilder:
                 "name": f"Verify selection - {desc}",
                 "action": "assert",
                 "assertion": {
-                    "selector": element.selector,
+                    "selector": yaml_selector,
                     "operator": "attribute_equals",
                     "attribute": "value",
                     "expected": selected_value,
@@ -3129,13 +3333,14 @@ class AutoTestBuilder:
         """
         steps: list[dict[str, Any]] = []
         desc = self._sanitize_step_name(element.semantic_description[:40])
+        yaml_selector = self._get_selector_for_yaml(element)
 
         # Step 1: Verify button is visible
         step_visibility: dict[str, Any] = {
             "name": f"Verify visible - {desc}",
             "action": "assert",
             "assertion": {
-                "selector": element.selector,
+                "selector": yaml_selector,
                 "operator": "is_visible",
                 "timeout": 5000,
             },
@@ -3151,7 +3356,7 @@ class AutoTestBuilder:
                 "name": f"Verify enabled - {desc}",
                 "action": "assert",
                 "assertion": {
-                    "selector": element.selector,
+                    "selector": yaml_selector,
                     "operator": "is_enabled",
                     "timeout": 5000,
                 },
@@ -3167,7 +3372,7 @@ class AutoTestBuilder:
             step_click: dict[str, Any] = {
                 "name": f"Click - {desc}",
                 "action": "click",
-                "selector": element.selector,
+                "selector": yaml_selector,
                 "timeout": 5000,
                 "continue_on_failure": True,
             }

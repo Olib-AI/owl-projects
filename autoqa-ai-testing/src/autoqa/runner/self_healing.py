@@ -113,9 +113,10 @@ class SelfHealingEngine:
         if self._history_path and self._history_path.exists():
             self._load_history()
 
-    def heal_selector(
+    async def heal_selector(
         self,
-        page: BrowserContext,
+        browser: OwlBrowser,
+        context_id: str,
         original_selector: str,
         action_context: str | None = None,
         element_description: str | None = None,
@@ -123,8 +124,11 @@ class SelfHealingEngine:
         """
         Attempt to heal a broken selector using deterministic strategies.
 
+        Delegates to heal_selector_async for SDK v2 compatibility.
+
         Args:
-            page: Browser context to search in
+            browser: OwlBrowser instance
+            context_id: Browser context ID
             original_selector: The selector that failed
             action_context: Context about what action was being performed
             element_description: Text hint for the element (not AI-based)
@@ -132,117 +136,8 @@ class SelfHealingEngine:
         Returns:
             HealingResult with success status and healed selector if found
         """
-        start_time = time.monotonic()
-        self._log.info(
-            "Starting selector healing (deterministic)",
-            original=original_selector,
-            context=action_context,
-        )
-
-        # Strategy 1: Check cached successful selector
-        if original_selector in self._selector_cache:
-            cached = self._selector_cache[original_selector]
-            if self._try_selector(page, cached):
-                return HealingResult(
-                    success=True,
-                    original_selector=original_selector,
-                    healed_selector=cached,
-                    strategy_used=HealingStrategy.CACHED_HISTORY,
-                    confidence=0.98,
-                    healing_time_ms=int((time.monotonic() - start_time) * 1000),
-                )
-
-        # Strategy 2: Check history for last working selector
-        history = self._selector_history.get(original_selector)
-        if history and history.last_working_selector != original_selector:
-            if self._try_selector(page, history.last_working_selector):
-                self._selector_cache[original_selector] = history.last_working_selector
-                return HealingResult(
-                    success=True,
-                    original_selector=original_selector,
-                    healed_selector=history.last_working_selector,
-                    strategy_used=HealingStrategy.DOM_STRUCTURE,
-                    confidence=0.95,
-                    healing_time_ms=int((time.monotonic() - start_time) * 1000),
-                )
-
-        candidates: list[SelectorCandidate] = []
-
-        # Strategy 3: Common ID/name/data-testid fallbacks from selector parsing
-        common_fallbacks = self._find_by_common_patterns(page, original_selector)
-        candidates.extend(common_fallbacks)
-
-        # Strategy 4: Text content matching (from selector or description)
-        text_hint = element_description or self._extract_text_hint(original_selector)
-        if text_hint:
-            text_candidates = self._find_by_text_match(page, text_hint)
-            candidates.extend(text_candidates)
-
-        # Strategy 5: Fuzzy attribute matching
-        attr_candidates = self._find_by_attribute_fuzzy(page, original_selector)
-        candidates.extend(attr_candidates)
-
-        # Strategy 6: XPath alternatives
-        xpath_candidates = self._find_by_xpath_fallback(page, original_selector)
-        candidates.extend(xpath_candidates)
-
-        # Strategy 7: CSS selector variations
-        css_candidates = self._find_by_css_variations(page, original_selector)
-        candidates.extend(css_candidates)
-
-        # Sort by confidence and limit
-        candidates.sort(key=lambda c: c.confidence, reverse=True)
-        candidates = candidates[: self.MAX_CANDIDATES]
-
-        for candidate in candidates:
-            if candidate.confidence < self._min_confidence:
-                continue
-
-            if self._try_selector(page, candidate.selector):
-                self._update_history(
-                    original_selector,
-                    candidate.selector,
-                    candidate,
-                )
-                self._selector_cache[original_selector] = candidate.selector
-
-                healing_time = int((time.monotonic() - start_time) * 1000)
-                self._log.info(
-                    "Selector healed successfully",
-                    original=original_selector,
-                    healed=candidate.selector,
-                    strategy=candidate.strategy,
-                    confidence=candidate.confidence,
-                    time_ms=healing_time,
-                )
-
-                return HealingResult(
-                    success=True,
-                    original_selector=original_selector,
-                    healed_selector=candidate.selector,
-                    strategy_used=candidate.strategy,
-                    confidence=candidate.confidence,
-                    candidates_evaluated=len(candidates),
-                    healing_time_ms=healing_time,
-                )
-
-        healing_time = int((time.monotonic() - start_time) * 1000)
-        self._log.warning(
-            "Selector healing failed",
-            original=original_selector,
-            candidates_tried=len(candidates),
-            time_ms=healing_time,
-        )
-
-        if history:
-            history.failure_count += 1
-
-        return HealingResult(
-            success=False,
-            original_selector=original_selector,
-            candidates_evaluated=len(candidates),
-            healing_time_ms=healing_time,
-            error="No suitable replacement selector found",
+        return await self.heal_selector_async(
+            browser, context_id, original_selector, action_context, element_description
         )
 
     async def heal_selector_async(
@@ -586,8 +481,8 @@ class SelfHealingEngine:
 
         return candidates
 
-    def _find_by_common_patterns(
-        self, page: OwlBrowser, original_selector: str
+    async def _find_by_common_patterns(
+        self, browser: OwlBrowser, context_id: str, original_selector: str
     ) -> list[SelectorCandidate]:
         """Find elements using common selector patterns (no AI)."""
         candidates: list[SelectorCandidate] = []
@@ -639,7 +534,7 @@ class SelfHealingEngine:
 
         # Try each pattern
         for selector, strategy, confidence in patterns_to_try:
-            if selector != original_selector and self._try_selector(page, selector):
+            if selector != original_selector and await self._try_selector(browser, context_id, selector):
                 candidates.append(
                     SelectorCandidate(
                         selector=selector,
@@ -650,8 +545,8 @@ class SelfHealingEngine:
 
         return candidates
 
-    def _find_by_css_variations(
-        self, page: BrowserContext, original_selector: str
+    async def _find_by_css_variations(
+        self, browser: OwlBrowser, context_id: str, original_selector: str
     ) -> list[SelectorCandidate]:
         """Generate CSS selector variations."""
         candidates: list[SelectorCandidate] = []
@@ -687,7 +582,7 @@ class SelfHealingEngine:
                 variations.append((f"{tag}[{attr}='{attrs[attr]}']", 0.68))
 
         for selector, confidence in variations:
-            if selector != original_selector and self._try_selector(page, selector):
+            if selector != original_selector and await self._try_selector(browser, context_id, selector):
                 candidates.append(
                     SelectorCandidate(
                         selector=selector,
@@ -698,8 +593,8 @@ class SelfHealingEngine:
 
         return candidates
 
-    def _find_by_text_match(
-        self, page: BrowserContext, text_hint: str
+    async def _find_by_text_match(
+        self, browser: OwlBrowser, context_id: str, text_hint: str
     ) -> list[SelectorCandidate]:
         """Find elements by text content matching (deterministic)."""
         candidates: list[SelectorCandidate] = []
@@ -728,7 +623,7 @@ class SelfHealingEngine:
         ]
 
         for selector, confidence in selectors_to_try:
-            if self._try_selector(page, selector):
+            if await self._try_selector(browser, context_id, selector):
                 candidates.append(
                     SelectorCandidate(
                         selector=selector,
@@ -740,8 +635,8 @@ class SelfHealingEngine:
 
         return candidates
 
-    def _find_by_attribute_fuzzy(
-        self, page: BrowserContext, original_selector: str
+    async def _find_by_attribute_fuzzy(
+        self, browser: OwlBrowser, context_id: str, original_selector: str
     ) -> list[SelectorCandidate]:
         """Find elements by fuzzy attribute matching."""
         candidates: list[SelectorCandidate] = []
@@ -758,7 +653,7 @@ class SelfHealingEngine:
             ]
 
             for selector in filter(None, fuzzy_selectors):
-                if selector != original_selector and self._try_selector(page, selector):
+                if selector != original_selector and await self._try_selector(browser, context_id, selector):
                     confidence = 0.75 if "*=" in selector else 0.85
                     candidates.append(
                         SelectorCandidate(
@@ -770,8 +665,8 @@ class SelfHealingEngine:
 
         return candidates
 
-    def _find_by_xpath_fallback(
-        self, page: BrowserContext, original_selector: str
+    async def _find_by_xpath_fallback(
+        self, browser: OwlBrowser, context_id: str, original_selector: str
     ) -> list[SelectorCandidate]:
         """Generate XPath fallback selectors."""
         candidates: list[SelectorCandidate] = []
@@ -782,7 +677,7 @@ class SelfHealingEngine:
         if original_selector.startswith("#"):
             element_id = original_selector[1:].split("[")[0].split(".")[0]
             xpath = f"//*[@id='{element_id}']"
-            if self._try_selector(page, xpath):
+            if await self._try_selector(browser, context_id, xpath):
                 candidates.append(
                     SelectorCandidate(
                         selector=xpath,
@@ -796,7 +691,7 @@ class SelfHealingEngine:
             classes = [c.strip() for c in classes if c.strip() and not c.startswith("=")]
             if classes:
                 xpath = f"//*[contains(@class, '{classes[0]}')]"
-                if self._try_selector(page, xpath):
+                if await self._try_selector(browser, context_id, xpath):
                     candidates.append(
                         SelectorCandidate(
                             selector=xpath,
@@ -807,11 +702,11 @@ class SelfHealingEngine:
 
         return candidates
 
-    def _try_selector(self, page: BrowserContext, selector: str) -> bool:
+    async def _try_selector(self, browser: OwlBrowser, context_id: str, selector: str) -> bool:
         """Test if a selector finds an element."""
         try:
-            visible = page.is_visible(selector)
-            return visible
+            result = await browser.is_visible(context_id=context_id, selector=selector)
+            return result.get("visible", False) if isinstance(result, dict) else bool(result)
         except Exception:
             return False
 
@@ -888,15 +783,20 @@ class SelfHealingEngine:
 
         self._save_history()
 
-    def capture_element_signature(
-        self, page: BrowserContext, selector: str
+    async def capture_element_signature(
+        self, browser: OwlBrowser, context_id: str, selector: str
     ) -> dict[str, Any] | None:
         """Capture element signature for future healing."""
         try:
-            bbox = page.get_bounding_box(selector)
+            try:
+                bbox = await browser.get_bounding_box(context_id=context_id, selector=selector)
+            except Exception:
+                bbox = None
+
             text = None
             try:
-                text = page.extract_text(selector)
+                result = await browser.extract_text(context_id=context_id, selector=selector)
+                text = result.get("text") if isinstance(result, dict) else result
             except Exception:
                 pass
 

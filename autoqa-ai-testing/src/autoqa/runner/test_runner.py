@@ -525,7 +525,7 @@ class TestRunner:
         SDK v2 Notes:
             - All browser operations are async
             - Uses context_id instead of page object
-            - Browser methods: navigate, click, type_, etc.
+            - Browser methods: navigate, click, type, etc.
         """
         step_name = step.name or f"Step {index + 1}"
         start_time = time.monotonic()
@@ -1137,11 +1137,21 @@ class TestRunner:
             - All browser methods are async
             - Method names map to OwlBrowser methods
             - context_id is always passed
-            - Method names: goto -> navigate, type -> type_
+            - Method names: goto -> navigate
             - screenshot: SDK returns base64, we handle path/filename saving
         """
         if method_name.startswith("_assert"):
             return await self._execute_assertion(context_id, method_name, args, step)
+
+        # Special handling for scroll_to: no browser_scroll_to in V2 SDK,
+        # use evaluate with window.scrollTo instead
+        if method_name == "scroll_to":
+            x = args.get("x", 0)
+            y = args.get("y", 0)
+            return await self._browser.evaluate(
+                context_id=context_id,
+                expression=f"window.scrollTo({x}, {y})",
+            )
 
         # Map old method names to SDK v2 method names
         method_map = {

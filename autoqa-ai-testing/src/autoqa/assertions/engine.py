@@ -951,7 +951,7 @@ class AssertionEngine:
 
         return True
 
-    def assert_element_detailed(self, config: ElementAssertionConfig) -> bool:
+    async def assert_element_detailed(self, config: ElementAssertionConfig) -> bool:
         """
         Execute a detailed element assertion with multiple checks.
 
@@ -961,7 +961,11 @@ class AssertionEngine:
         Raises:
             AssertionError: If any check fails
         """
-        elements = self._page.find_element(config.selector, max_results=100)
+        elements = await self._browser.find_element(
+            context_id=self._context_id,
+            description=config.selector,
+            max_results=100,
+        )
         element_count = len(elements) if elements else 0
 
         if config.count is not None:
@@ -987,7 +991,10 @@ class AssertionEngine:
             )
 
         if config.text:
-            actual_text = self._page.extract_text(config.selector)
+            text_result = await self._browser.extract_text(
+                context_id=self._context_id, selector=config.selector
+            )
+            actual_text = text_result.get("text") if isinstance(text_result, dict) else (text_result or "")
             if actual_text != config.text:
                 raise AssertionError(
                     config.message or "Text mismatch",
@@ -996,7 +1003,10 @@ class AssertionEngine:
                 )
 
         if config.text_contains:
-            actual_text = self._page.extract_text(config.selector)
+            text_result = await self._browser.extract_text(
+                context_id=self._context_id, selector=config.selector
+            )
+            actual_text = text_result.get("text") if isinstance(text_result, dict) else (text_result or "")
             if config.text_contains not in actual_text:
                 raise AssertionError(
                     config.message or "Text does not contain expected",
@@ -1005,7 +1015,10 @@ class AssertionEngine:
                 )
 
         if config.text_matches:
-            actual_text = self._page.extract_text(config.selector)
+            text_result = await self._browser.extract_text(
+                context_id=self._context_id, selector=config.selector
+            )
+            actual_text = text_result.get("text") if isinstance(text_result, dict) else (text_result or "")
             if not re.search(config.text_matches, actual_text):
                 raise AssertionError(
                     config.message or "Text does not match pattern",
@@ -1014,7 +1027,7 @@ class AssertionEngine:
                 )
 
         if config.attribute and config.attribute_value is not None:
-            actual_attr = self._page.get_attribute(config.selector, config.attribute)
+            actual_attr = await self._get_attribute(config.selector, config.attribute)
             if actual_attr != config.attribute_value:
                 raise AssertionError(
                     config.message or f"Attribute '{config.attribute}' mismatch",
@@ -1023,7 +1036,7 @@ class AssertionEngine:
                 )
 
         if config.is_visible is not None:
-            actual_visible = self._page.is_visible(config.selector)
+            actual_visible = await self._is_visible(config.selector)
             if actual_visible != config.is_visible:
                 raise AssertionError(
                     config.message or "Visibility mismatch",
@@ -1032,7 +1045,7 @@ class AssertionEngine:
                 )
 
         if config.is_enabled is not None:
-            actual_enabled = self._page.is_enabled(config.selector)
+            actual_enabled = await self._is_enabled(config.selector)
             if actual_enabled != config.is_enabled:
                 raise AssertionError(
                     config.message or "Enabled state mismatch",
@@ -1054,7 +1067,7 @@ class AssertionEngine:
             self._ml_engine = MLAssertionEngine()
         return self._ml_engine
 
-    def assert_ml(self, config: MLAssertionConfig) -> bool:
+    async def assert_ml(self, config: MLAssertionConfig) -> bool:
         """
         Execute a unified ML-based assertion.
 
@@ -1066,7 +1079,7 @@ class AssertionEngine:
         Raises:
             AssertionError: If any ML assertion fails
         """
-        screenshot = self._page.screenshot()
+        screenshot = await self._take_screenshot()
         ml_engine = self._get_ml_engine()
 
         if config.ocr is not None:
@@ -1168,7 +1181,7 @@ class AssertionEngine:
 
         return True
 
-    def assert_ocr(self, config: OCRAssertionConfig) -> bool:
+    async def assert_ocr(self, config: OCRAssertionConfig) -> bool:
         """
         Execute an OCR-based text assertion.
 
@@ -1178,7 +1191,7 @@ class AssertionEngine:
         Raises:
             AssertionError: If OCR assertion fails
         """
-        screenshot = self._page.screenshot()
+        screenshot = await self._take_screenshot()
         ml_engine = self._get_ml_engine()
 
         result = ml_engine.ocr.validate(
@@ -1199,7 +1212,7 @@ class AssertionEngine:
 
         return True
 
-    def assert_ui_state(self, config: UIStateAssertionConfig) -> bool:
+    async def assert_ui_state(self, config: UIStateAssertionConfig) -> bool:
         """
         Execute a UI state classification assertion.
 
@@ -1209,7 +1222,7 @@ class AssertionEngine:
         Raises:
             AssertionError: If UI state assertion fails
         """
-        screenshot = self._page.screenshot()
+        screenshot = await self._take_screenshot()
         ml_engine = self._get_ml_engine()
 
         result = ml_engine.classifier.validate(
@@ -1228,7 +1241,7 @@ class AssertionEngine:
 
         return True
 
-    def assert_color(self, config: ColorAssertionConfig) -> bool:
+    async def assert_color(self, config: ColorAssertionConfig) -> bool:
         """
         Execute a color analysis assertion.
 
@@ -1238,7 +1251,7 @@ class AssertionEngine:
         Raises:
             AssertionError: If color assertion fails
         """
-        screenshot = self._page.screenshot()
+        screenshot = await self._take_screenshot()
         ml_engine = self._get_ml_engine()
 
         color_kwargs: dict[str, Any] = {
@@ -1262,7 +1275,7 @@ class AssertionEngine:
 
         return True
 
-    def assert_layout(self, config: LayoutAssertionConfig) -> bool:
+    async def assert_layout(self, config: LayoutAssertionConfig) -> bool:
         """
         Execute a layout analysis assertion.
 
@@ -1272,7 +1285,7 @@ class AssertionEngine:
         Raises:
             AssertionError: If layout assertion fails
         """
-        screenshot = self._page.screenshot()
+        screenshot = await self._take_screenshot()
         ml_engine = self._get_ml_engine()
 
         result = ml_engine.layout_analyzer.validate(
@@ -1295,7 +1308,7 @@ class AssertionEngine:
 
         return True
 
-    def assert_icon(self, config: IconAssertionConfig) -> bool:
+    async def assert_icon(self, config: IconAssertionConfig) -> bool:
         """
         Execute an icon/logo matching assertion.
 
@@ -1305,7 +1318,7 @@ class AssertionEngine:
         Raises:
             AssertionError: If icon assertion fails
         """
-        screenshot = self._page.screenshot()
+        screenshot = await self._take_screenshot()
         ml_engine = self._get_ml_engine()
 
         result = ml_engine.icon_matcher.validate(
@@ -1325,7 +1338,7 @@ class AssertionEngine:
 
         return True
 
-    def assert_accessibility(self, config: AccessibilityAssertionConfig) -> bool:
+    async def assert_accessibility(self, config: AccessibilityAssertionConfig) -> bool:
         """
         Execute an accessibility assertion (contrast ratio, WCAG compliance).
 
@@ -1335,7 +1348,7 @@ class AssertionEngine:
         Raises:
             AssertionError: If accessibility assertion fails
         """
-        screenshot = self._page.screenshot()
+        screenshot = await self._take_screenshot()
         ml_engine = self._get_ml_engine()
 
         result = ml_engine.accessibility_checker.validate(

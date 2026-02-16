@@ -24,7 +24,7 @@ from PIL import Image
 from sklearn.cluster import KMeans
 
 if TYPE_CHECKING:
-    from owl_browser import BrowserContext
+    from owl_browser import OwlBrowser
 
 logger = structlog.get_logger(__name__)
 
@@ -218,14 +218,16 @@ class VisualAnalyzer:
 
     async def analyze(
         self,
-        page: BrowserContext,
+        browser: "OwlBrowser",
+        context_id: str,
         screenshot: bytes | None = None,
     ) -> VisualAnalysisResult:
         """
         Perform comprehensive visual analysis.
 
         Args:
-            page: Browser context with loaded page
+            browser: OwlBrowser instance
+            context_id: Browser context identifier
             screenshot: Optional pre-captured screenshot
 
         Returns:
@@ -235,19 +237,19 @@ class VisualAnalyzer:
 
         # Capture screenshot if not provided
         if screenshot is None:
-            screenshot = page.screenshot()
+            screenshot = await browser.screenshot(context_id=context_id)
 
         # Convert screenshot to formats needed for analysis
         pil_image = Image.open(io.BytesIO(screenshot))
         cv2_image = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
 
         # Perform analyses
-        layout = await self._analyze_layout(page, cv2_image)
-        hierarchy = await self._analyze_hierarchy(page, cv2_image)
+        layout = await self._analyze_layout(browser, context_id, cv2_image)
+        hierarchy = await self._analyze_hierarchy(browser, context_id, cv2_image)
         colors = self._analyze_colors(cv2_image)
-        accessibility = await self._check_accessibility(page, cv2_image)
+        accessibility = await self._check_accessibility(browser, context_id, cv2_image)
         contrast_issues = self._find_contrast_issues(cv2_image)
-        breakpoints = await self._analyze_responsive(page)
+        breakpoints = await self._analyze_responsive(browser, context_id)
         complexity = self._calculate_visual_complexity(cv2_image)
         screenshot_hash = self._calculate_screenshot_hash(cv2_image)
 
@@ -273,7 +275,8 @@ class VisualAnalyzer:
 
     async def _analyze_layout(
         self,
-        page: BrowserContext,
+        browser: "OwlBrowser",
+        context_id: str,
         image: np.ndarray[Any, np.dtype[np.uint8]],
     ) -> LayoutInfo:
         """Analyze page layout structure."""
@@ -365,7 +368,7 @@ class VisualAnalyzer:
         })()
         """
 
-        layout_data = page.expression(script)
+        layout_data = await browser.evaluate(context_id=context_id, expression=script)
 
         # Determine layout type
         layout_type = self._classify_layout(layout_data)
@@ -411,7 +414,8 @@ class VisualAnalyzer:
 
     async def _analyze_hierarchy(
         self,
-        page: BrowserContext,
+        browser: "OwlBrowser",
+        context_id: str,
         image: np.ndarray[Any, np.dtype[np.uint8]],
     ) -> VisualHierarchy:
         """Analyze visual hierarchy of the page."""
@@ -490,7 +494,7 @@ class VisualAnalyzer:
         })()
         """
 
-        hierarchy_data = page.expression(script)
+        hierarchy_data = await browser.evaluate(context_id=context_id, expression=script)
 
         # Calculate whitespace distribution from image
         whitespace = self._calculate_whitespace_distribution(image)
@@ -579,30 +583,31 @@ class VisualAnalyzer:
 
     async def _check_accessibility(
         self,
-        page: BrowserContext,
+        browser: "OwlBrowser",
+        context_id: str,
         image: np.ndarray[Any, np.dtype[np.uint8]],
     ) -> list[AccessibilityCheck]:
         """Perform accessibility checks."""
         checks: list[AccessibilityCheck] = []
 
         # Check for alt text on images
-        alt_text_check = await self._check_image_alt_text(page)
+        alt_text_check = await self._check_image_alt_text(browser, context_id)
         checks.append(alt_text_check)
 
         # Check for form labels
-        label_check = await self._check_form_labels(page)
+        label_check = await self._check_form_labels(browser, context_id)
         checks.append(label_check)
 
         # Check for heading structure
-        heading_check = await self._check_heading_structure(page)
+        heading_check = await self._check_heading_structure(browser, context_id)
         checks.append(heading_check)
 
         # Check for focus indicators
-        focus_check = await self._check_focus_indicators(page)
+        focus_check = await self._check_focus_indicators(browser, context_id)
         checks.append(focus_check)
 
         # Check for touch target sizes
-        touch_target_check = await self._check_touch_targets(page)
+        touch_target_check = await self._check_touch_targets(browser, context_id)
         checks.append(touch_target_check)
 
         # Check color contrast (basic)
@@ -611,7 +616,7 @@ class VisualAnalyzer:
 
         return checks
 
-    async def _check_image_alt_text(self, page: BrowserContext) -> AccessibilityCheck:
+    async def _check_image_alt_text(self, browser: "OwlBrowser", context_id: str) -> AccessibilityCheck:
         """Check images for alt text."""
         script = """
         (() => {
@@ -638,7 +643,7 @@ class VisualAnalyzer:
         })()
         """
 
-        result = page.expression(script)
+        result = await browser.evaluate(context_id=context_id, expression=script)
         passed = result["withoutAlt"] == 0
 
         return AccessibilityCheck(
@@ -649,7 +654,7 @@ class VisualAnalyzer:
             details=result,
         )
 
-    async def _check_form_labels(self, page: BrowserContext) -> AccessibilityCheck:
+    async def _check_form_labels(self, browser: "OwlBrowser", context_id: str) -> AccessibilityCheck:
         """Check form inputs for associated labels."""
         script = """
         (() => {
@@ -681,7 +686,7 @@ class VisualAnalyzer:
         })()
         """
 
-        result = page.expression(script)
+        result = await browser.evaluate(context_id=context_id, expression=script)
         passed = result["unlabeled"] == 0
 
         return AccessibilityCheck(
@@ -692,7 +697,7 @@ class VisualAnalyzer:
             details=result,
         )
 
-    async def _check_heading_structure(self, page: BrowserContext) -> AccessibilityCheck:
+    async def _check_heading_structure(self, browser: "OwlBrowser", context_id: str) -> AccessibilityCheck:
         """Check heading hierarchy."""
         script = """
         (() => {
@@ -729,7 +734,7 @@ class VisualAnalyzer:
         })()
         """
 
-        result = page.expression(script)
+        result = await browser.evaluate(context_id=context_id, expression=script)
         passed = len(result["issues"]) == 0
 
         return AccessibilityCheck(
@@ -740,7 +745,7 @@ class VisualAnalyzer:
             details=result,
         )
 
-    async def _check_focus_indicators(self, page: BrowserContext) -> AccessibilityCheck:
+    async def _check_focus_indicators(self, browser: "OwlBrowser", context_id: str) -> AccessibilityCheck:
         """Check for visible focus indicators."""
         script = """
         (() => {
@@ -767,7 +772,7 @@ class VisualAnalyzer:
         })()
         """
 
-        result = page.expression(script)
+        result = await browser.evaluate(context_id=context_id, expression=script)
         # This is a soft check since we can't fully verify focus states
         passed = result["potentialIssues"] < result["total"] * 0.5
 
@@ -779,7 +784,7 @@ class VisualAnalyzer:
             details=result,
         )
 
-    async def _check_touch_targets(self, page: BrowserContext) -> AccessibilityCheck:
+    async def _check_touch_targets(self, browser: "OwlBrowser", context_id: str) -> AccessibilityCheck:
         """Check touch target sizes (minimum 44x44px recommended)."""
         script = """
         (() => {
@@ -808,7 +813,7 @@ class VisualAnalyzer:
         })()
         """
 
-        result = page.expression(script)
+        result = await browser.evaluate(context_id=context_id, expression=script)
         passed = result["tooSmall"] < result["total"] * 0.2  # Allow some small elements
 
         return AccessibilityCheck(
@@ -904,13 +909,13 @@ class VisualAnalyzer:
         return issues
 
     async def _analyze_responsive(
-        self, page: BrowserContext
+        self, browser: "OwlBrowser", context_id: str
     ) -> list[ResponsiveBreakpoint]:
         """Analyze responsive behavior at different breakpoints."""
         breakpoints: list[ResponsiveBreakpoint] = []
 
         # Get current viewport size
-        current_size = page.expression("""
+        current_size = await browser.evaluate(context_id=context_id, expression="""
         (() => ({
             width: window.innerWidth,
             height: window.innerHeight
@@ -918,7 +923,7 @@ class VisualAnalyzer:
         """)
 
         # Get baseline visible elements
-        baseline_elements = await self._get_visible_elements(page)
+        baseline_elements = await self._get_visible_elements(browser, context_id)
 
         # Only analyze a few key breakpoints to avoid too much time
         key_breakpoints = [
@@ -943,7 +948,7 @@ class VisualAnalyzer:
 
         return breakpoints
 
-    async def _get_visible_elements(self, page: BrowserContext) -> list[str]:
+    async def _get_visible_elements(self, browser: "OwlBrowser", context_id: str) -> list[str]:
         """Get list of visible element selectors."""
         script = """
         (() => {
@@ -970,7 +975,7 @@ class VisualAnalyzer:
         })()
         """
 
-        return page.expression(script)
+        return await browser.evaluate(context_id=context_id, expression=script)
 
     def _calculate_visual_complexity(
         self, image: np.ndarray[Any, np.dtype[np.uint8]]

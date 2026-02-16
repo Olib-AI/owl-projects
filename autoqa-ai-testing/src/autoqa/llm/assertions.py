@@ -19,7 +19,7 @@ from autoqa.llm.config import LLMConfig, ToolName
 from autoqa.llm.service import LLMService, get_llm_service
 
 if TYPE_CHECKING:
-    from owl_browser import BrowserContext
+    from owl_browser import OwlBrowser
 
 logger = structlog.get_logger(__name__)
 
@@ -64,11 +64,13 @@ class LLMAssertionEngine:
 
     def __init__(
         self,
-        page: BrowserContext,
+        browser: OwlBrowser,
+        context_id: str,
         llm_service: LLMService | None = None,
         llm_config: LLMConfig | None = None,
     ) -> None:
-        self._page = page
+        self._browser = browser
+        self._context_id = context_id
         self._llm_service = llm_service or get_llm_service(llm_config)
         self._log = logger.bind(component="llm_assertion_engine")
 
@@ -102,9 +104,9 @@ class LLMAssertionEngine:
         self._log.debug("Executing semantic assertion", assertion=assertion)
 
         # Gather page context
-        url = self._get_current_url()
-        visible_text = self._get_visible_text()
-        key_elements = self._get_key_elements()
+        url = await self._get_current_url()
+        visible_text = await self._get_visible_text()
+        key_elements = await self._get_key_elements()
 
         # If LLM is disabled, use fallback heuristics
         if not self.is_enabled:
@@ -192,11 +194,14 @@ class LLMAssertionEngine:
         # Get content
         if selector:
             try:
-                content = self._page.extract_text(selector)
+                result = await self._browser.extract_text(
+                    context_id=self._context_id, selector=selector
+                )
+                content = result.get("text", "") if isinstance(result, dict) else (result or "")
             except Exception:
-                content = self._get_visible_text()
+                content = await self._get_visible_text()
         else:
-            content = self._get_visible_text()
+            content = await self._get_visible_text()
 
         # Fallback if LLM disabled
         if not self.is_enabled:
@@ -301,7 +306,7 @@ class LLMAssertionEngine:
         ]
         patterns = error_patterns or default_patterns
 
-        visible_text = self._get_visible_text().lower()
+        visible_text = (await self._get_visible_text()).lower()
 
         # Quick check without LLM
         found_errors = [p for p in patterns if p.lower() in visible_text]
@@ -437,21 +442,28 @@ class LLMAssertionEngine:
     # Helper Methods
     # =========================================================================
 
-    def _get_current_url(self) -> str:
+    async def _get_current_url(self) -> str:
         """Get current page URL."""
         try:
-            return self._page.evaluate("window.location.href", return_value=True) or ""
+            result = await self._browser.evaluate(
+                context_id=self._context_id,
+                expression="window.location.href",
+            )
+            return result or ""
         except Exception:
             return ""
 
-    def _get_visible_text(self) -> str:
+    async def _get_visible_text(self) -> str:
         """Get visible text content from page."""
         try:
-            return self._page.extract_text("body") or ""
+            result = await self._browser.extract_text(
+                context_id=self._context_id, selector="body"
+            )
+            return result.get("text", "") if isinstance(result, dict) else (result or "")
         except Exception:
             return ""
 
-    def _get_key_elements(self) -> list[dict[str, Any]]:
+    async def _get_key_elements(self) -> list[dict[str, Any]]:
         """Get key elements from page for context."""
         try:
             script = """
@@ -480,6 +492,10 @@ class LLMAssertionEngine:
                 return elements;
             })()
             """
-            return self._page.evaluate(script, return_value=True) or []
+            result = await self._browser.evaluate(
+                context_id=self._context_id,
+                expression=script,
+            )
+            return result or []
         except Exception:
             return []

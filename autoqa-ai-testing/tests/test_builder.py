@@ -222,7 +222,7 @@ class TestSemanticSelectorGeneration:
         builder = AutoTestBuilder(browser=browser_mock, config=config)
 
         raw = {"ariaLabel": "Search", "text": "Go", "placeholder": "Search..."}
-        selector = builder._generate_semantic_selector(raw, ElementType.BUTTON)
+        selector = builder._generate_css_selector(raw, ElementType.BUTTON)
         assert selector == "Search"
 
     def test_selector_uses_text_content(self) -> None:
@@ -232,7 +232,7 @@ class TestSemanticSelectorGeneration:
         builder = AutoTestBuilder(browser=browser_mock, config=config)
 
         raw = {"ariaLabel": None, "text": "Click Me"}
-        selector = builder._generate_semantic_selector(raw, ElementType.BUTTON)
+        selector = builder._generate_css_selector(raw, ElementType.BUTTON)
         assert selector == "Click Me"
 
     def test_selector_formats_input_name(self) -> None:
@@ -242,7 +242,7 @@ class TestSemanticSelectorGeneration:
         builder = AutoTestBuilder(browser=browser_mock, config=config)
 
         raw = {"ariaLabel": None, "text": None, "placeholder": None, "name": "user_name"}
-        selector = builder._generate_semantic_selector(raw, ElementType.INPUT_TEXT)
+        selector = builder._generate_css_selector(raw, ElementType.INPUT_TEXT)
         assert selector == "user name input"
 
 

@@ -27,8 +27,9 @@ autoqa run my_tests.yaml
 That's it! AutoQA will:
 1. Crawl your website and discover all interactive elements
 2. Detect login forms, navigation flows, and key user journeys
-3. Generate a complete YAML test specification
-4. Execute the tests with self-healing selector recovery
+3. Optionally use **vision AI** to analyze page screenshots for richer element detection
+4. Generate a complete YAML test specification
+5. Execute the tests with self-healing selector recovery
 
 ---
 
@@ -45,6 +46,9 @@ autoqa build https://myapp.com/login -u testuser -p secret123 -o tests/login.yam
 
 # Deep crawl (multiple pages)
 autoqa build https://myapp.com --depth 2 --max-pages 20 -o tests/full.yaml
+
+# With vision-enhanced analysis (requires LLM config - see .env.example)
+autoqa build https://myapp.com --vision -o tests/vision.yaml
 ```
 
 ### 2. Run Tests
@@ -101,6 +105,7 @@ steps:
 ## Key Features
 
 - **Auto Test Generation** - Build tests automatically from any URL
+- **Vision-Enhanced Analysis** - Optionally use vision AI to detect UI elements from screenshots
 - **Natural Language YAML** - Human-readable test definitions
 - **Self-Healing Selectors** - Automatic recovery from broken selectors (no AI required)
 - **Visual Regression** - Screenshot comparison with anti-aliasing tolerance
@@ -125,16 +130,21 @@ pip install -e ".[dev]"
 
 ### Environment Setup
 
-Create a `.env` file:
+Copy the example and fill in your values:
+
+```bash
+cp .env.example .env
+```
+
+At minimum you need the browser connection:
 
 ```bash
 # Required: Remote browser connection
 OWL_BROWSER_URL=https://your-browser-server.example.com
 OWL_BROWSER_TOKEN=your-auth-token
-
-# Optional: Storage
-ARTIFACT_PATH=./artifacts
 ```
+
+See [`.env.example`](.env.example) for all available options including LLM and vision configuration.
 
 ---
 
@@ -150,7 +160,48 @@ ARTIFACT_PATH=./artifacts
 | `autoqa ci <provider>` | Generate CI/CD config |
 | `autoqa server` | Start API server |
 
-See [CLI Reference](docs/TECHNICAL.md#cli-reference) for full options.
+### `autoqa build` Options
+
+```
+autoqa build <url> [options]
+
+Options:
+  -o, --output FILE          Output YAML file path (default: stdout)
+  -u, --username USER        Username for authentication
+  -p, --password PASS        Password for authentication
+  -d, --depth N              Crawl depth for same-domain pages (default: 1)
+  --max-pages N              Maximum pages to analyze (default: 10)
+  --include-hidden           Include hidden elements in analysis
+  --timeout MS               Timeout in milliseconds (default: 30000)
+  --exclude PATTERN          Regex pattern for URLs to exclude (repeatable)
+  --include PATTERN          Regex pattern for URLs to include (repeatable)
+  --selector-strategy MODE   'semantic' (default) or 'css'
+  --vision                   Use vision model to enhance page analysis
+```
+
+### `autoqa run` Options
+
+```
+autoqa run <paths> [options]
+
+Options:
+  -e, --environment ENV      Target environment (default: "default")
+  --parallel                 Run tests in parallel
+  --max-parallel N           Maximum parallel tests (default: 5)
+  --record-video             Record video of test execution
+  --artifacts-dir DIR        Directory for artifacts (default: ./artifacts)
+  --output-format FORMAT     json | junit | html (default: json)
+  --output-file FILE         Output file path
+  --var KEY=VALUE            Set variable (repeatable)
+  --healing-history FILE     Path to self-healing history file
+  --default-timeout MS       Default timeout (default: 10000)
+  --no-network-idle-wait     Disable network idle wait after navigation
+  --fast-mode                Reduced timeouts for faster execution
+  --versioned                Enable versioned test tracking
+  --versioning-path PATH     Version history storage (default: .autoqa/history)
+```
+
+See [CLI Reference](docs/TECHNICAL.md#cli-reference) for full details.
 
 ---
 
@@ -184,6 +235,61 @@ Self-healing uses deterministic strategies:
 - ID/name/aria-label fallbacks
 - Attribute fuzzy matching
 - XPath alternatives
+
+---
+
+## Vision-Enhanced Analysis
+
+When `--vision` is passed to `autoqa build`, AutoQA takes a screenshot of each page and sends it to a vision-capable LLM for analysis. This is **additive** -- DOM-based analysis always runs first, and vision enriches the results with:
+
+- Richer semantic descriptions of detected elements
+- Elements that may be missed by DOM inspection alone (e.g., canvas content, SVG buttons)
+- Layout observations and form grouping insights
+
+### Setup
+
+Vision requires an OpenAI-compatible endpoint with a vision-capable model. Any of these work:
+
+| Provider | Example Model |
+|----------|---------------|
+| OpenAI | `gpt-4o`, `gpt-4-turbo` |
+| Anthropic | `claude-3-sonnet`, `claude-4-opus` |
+| Google | `gemini-pro` |
+| Local (LM Studio) | `zai-org/glm-4.6v-flash` |
+| Local (Ollama) | `llava`, `qwen-vl` |
+
+```bash
+# .env - Example with local LM Studio
+AUTOQA_LLM_ENABLED=true
+AUTOQA_LLM_BASE_URL=http://127.0.0.1:1234/v1
+AUTOQA_LLM_MODEL=zai-org/glm-4.6v-flash
+AUTOQA_LLM_API_KEY=lm-studio
+AUTOQA_LLM_PROVIDER=custom
+AUTOQA_LLM_TIMEOUT_MS=120000
+AUTOQA_LLM_TEST_BUILDER_ENABLED=true
+AUTOQA_LLM_TEST_BUILDER_VISION=true
+```
+
+```bash
+# Run with vision
+autoqa build https://myapp.com --vision -o tests/enhanced.yaml
+```
+
+Vision capability is auto-detected from the model name. If your model supports vision but isn't detected, set `AUTOQA_LLM_VISION_CAPABLE=true` explicitly.
+
+### Security
+
+Screenshots may contain untrusted content. AutoQA defends against prompt injection with:
+
+1. System prompt explicitly marks screenshots as untrusted input
+2. No DOM text sent alongside the image (prevents text reinforcement)
+3. Strict JSON output schema enforced
+4. Response sanitization (string truncation, control char stripping, array length caps)
+5. Confidence thresholds (< 0.3 discarded, vision-only elements require >= 0.7)
+
+### Graceful Fallback
+
+If vision fails for any reason (model unavailable, timeout, invalid response), the builder continues with DOM-only analysis. Vision never blocks test generation.
 
 ---
 

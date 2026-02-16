@@ -41,7 +41,7 @@ class StepTransformer:
             StepAction.UPLOAD: "upload_file",
             # Scroll
             StepAction.SCROLL: "scroll_by",
-            StepAction.SCROLL_TO: "scroll_to",
+            StepAction.SCROLL_TO: "scroll_to",  # handled specially in test_runner
             StepAction.SCROLL_TO_ELEMENT: "scroll_to_element",
             # Extraction
             StepAction.SCREENSHOT: "screenshot",
@@ -63,8 +63,8 @@ class StepTransformer:
             StepAction.DELETE_COOKIES: "delete_cookies",
             # Viewport & Pages
             StepAction.SET_VIEWPORT: "set_viewport",
-            StepAction.NEW_PAGE: "new_page",
-            StepAction.CLOSE_PAGE: "close",
+            StepAction.NEW_PAGE: "new_tab",
+            StepAction.CLOSE_PAGE: "close_tab",
             # Recording
             StepAction.START_VIDEO: "start_video_recording",
             StepAction.STOP_VIDEO: "stop_video_recording",
@@ -226,9 +226,8 @@ class StepTransformer:
                 args["return_value"] = True
 
             case StepAction.FIND_ELEMENT:
-                args["selector"] = step.selector
-                if step.text:
-                    args["text"] = step.text
+                args["description"] = step.text or step.selector or ""
+                args["max_results"] = getattr(step, "max_results", 5)
 
             # State checks
             case StepAction.CHECK_VISIBLE:

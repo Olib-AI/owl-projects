@@ -25,7 +25,7 @@ from urllib.parse import urljoin, urlparse
 import structlog
 
 if TYPE_CHECKING:
-    from owl_browser import Browser, BrowserContext
+    from owl_browser import OwlBrowser
 
     from autoqa.builder.analyzer.page_analyzer import PageAnalysisResult
     from autoqa.builder.crawler.state_manager import ApplicationState, StateManager
@@ -168,7 +168,7 @@ class IntelligentCrawler:
 
     def __init__(
         self,
-        browser: Browser,
+        browser: "OwlBrowser",
         config: CrawlConfig,
         state_manager: StateManager | None = None,
     ) -> None:
@@ -240,8 +240,9 @@ class IntelligentCrawler:
         # Add start URL to queue
         self._enqueue(crawl_start_url, URLPriority.HIGH, depth=0)
 
-        # Create page context
-        page = self._browser.new_page()
+        # Create browser context
+        ctx = await self._browser.create_context()
+        context_id = ctx["context_id"]
 
         try:
             # Process queue
@@ -257,7 +258,7 @@ class IntelligentCrawler:
                 await self._apply_rate_limit()
 
                 # Crawl the page
-                crawled_page = await self._crawl_page(page, item)
+                crawled_page = await self._crawl_page(context_id, item)
 
                 if crawled_page.state == CrawlState.COMPLETED:
                     self._crawled_pages.append(crawled_page)
@@ -282,7 +283,7 @@ class IntelligentCrawler:
             coverage_score = self._calculate_coverage_score()
 
         finally:
-            page.close()
+            await self._browser.close_context(context_id=context_id)
 
         # Build result
         total_duration = int((time.time() - self._start_time) * 1000)
@@ -314,7 +315,7 @@ class IntelligentCrawler:
 
     async def _crawl_page(
         self,
-        page: BrowserContext,
+        context_id: str,
         item: CrawlQueueItem,
     ) -> CrawledPage:
         """Crawl a single page."""
@@ -333,13 +334,14 @@ class IntelligentCrawler:
 
         try:
             # Navigate to URL
-            page.goto(url, timeout=self._config.timeout_ms)
+            await self._browser.navigate(context_id=context_id, url=url, timeout=self._config.timeout_ms)
 
             # Wait for page load
-            time.sleep(self._config.wait_after_navigation_ms / 1000)
+            await asyncio.sleep(self._config.wait_after_navigation_ms / 1000)
 
             # Get final URL (after redirects)
-            final_url = page.get_current_url()
+            page_info = await self._browser.get_page_info(context_id=context_id)
+            final_url = page_info.get("url", url)
             crawled.final_url = final_url
 
             # Track redirects
@@ -347,7 +349,7 @@ class IntelligentCrawler:
                 self._url_redirects[url] = final_url
 
             # Check if we've already seen this content
-            content_hash = self._get_content_hash(page)
+            content_hash = await self._get_content_hash(context_id)
             if content_hash in self._visited_content_hashes:
                 crawled.state = CrawlState.SKIPPED
                 self._log.debug("Skipping duplicate content", url=url)
@@ -356,32 +358,32 @@ class IntelligentCrawler:
             self._visited_content_hashes.add(content_hash)
 
             # Get page title
-            crawled.title = page.get_title() or "Untitled"
+            crawled.title = await self._browser.evaluate(context_id=context_id, expression="document.title") or "Untitled"
 
             # Capture HTML content for analysis
-            crawled.html_content = page.get_html()
+            crawled.html_content = await self._browser.get_html(context_id=context_id)
 
             # Capture screenshot if needed
-            crawled.screenshot = page.screenshot()
+            crawled.screenshot = await self._browser.screenshot(context_id=context_id)
 
             # Discover URLs
-            crawled.discovered_urls = self._discover_urls(page, url)
+            crawled.discovered_urls = await self._discover_urls(context_id, url)
             self._urls_discovered += len(crawled.discovered_urls)
 
             # Discover forms
-            crawled.forms_found = self._discover_forms(page)
+            crawled.forms_found = await self._discover_forms(context_id)
             self._forms_found += len(crawled.forms_found)
 
             # Check for authentication
             if self._detect_authentication_form(crawled.forms_found):
                 self._auth_detected = True
                 if self._config.authentication:
-                    auth_success = await self._handle_authentication(page)
+                    auth_success = await self._handle_authentication(context_id)
                     self._auth_completed = auth_success
 
             # Track state if state manager available
             if self._state_manager:
-                current_state = await self._state_manager.capture_state(page)
+                current_state = await self._state_manager.capture_state(self._browser, context_id)
                 crawled.app_state = current_state
 
             crawled.state = CrawlState.COMPLETED
@@ -478,7 +480,7 @@ class IntelligentCrawler:
 
         return normalized
 
-    def _discover_urls(self, page: BrowserContext, base_url: str) -> list[str]:
+    async def _discover_urls(self, context_id: str, base_url: str) -> list[str]:
         """Discover URLs from the current page."""
         script = """
         (() => {
@@ -510,7 +512,7 @@ class IntelligentCrawler:
         })()
         """
 
-        raw_urls = page.expression(script)
+        raw_urls = await self._browser.evaluate(context_id=context_id, expression=script)
         discovered: list[str] = []
 
         for url in raw_urls:
@@ -521,7 +523,7 @@ class IntelligentCrawler:
 
         return list(set(discovered))
 
-    def _discover_forms(self, page: BrowserContext) -> list[dict[str, Any]]:
+    async def _discover_forms(self, context_id: str) -> list[dict[str, Any]]:
         """Discover forms on the current page."""
         script = """
         (() => {
@@ -555,7 +557,7 @@ class IntelligentCrawler:
         })()
         """
 
-        return page.expression(script)
+        return await self._browser.evaluate(context_id=context_id, expression=script)
 
     def _detect_authentication_form(self, forms: list[dict[str, Any]]) -> bool:
         """Detect if any form is an authentication form."""
@@ -567,7 +569,7 @@ class IntelligentCrawler:
                 return True
         return False
 
-    async def _handle_authentication(self, page: BrowserContext) -> bool:
+    async def _handle_authentication(self, context_id: str) -> bool:
         """Handle authentication if credentials provided."""
         if not self._config.authentication:
             return False
@@ -590,19 +592,19 @@ class IntelligentCrawler:
 
             for selector in username_selectors:
                 try:
-                    page.type(selector, username)
+                    await self._browser.type(context_id=context_id, selector=selector, text=username)
                     break
                 except Exception:
                     continue
 
             # Find password field
-            page.type("input[type='password']", password)
+            await self._browser.type(context_id=context_id, selector="input[type='password']", text=password)
 
             # Submit
-            page.click("button[type='submit'], input[type='submit']")
+            await self._browser.click(context_id=context_id, selector="button[type='submit'], input[type='submit']")
 
             # Wait for response
-            time.sleep(2)
+            await asyncio.sleep(2)
 
             self._log.info("Authentication submitted")
             return True
@@ -611,7 +613,7 @@ class IntelligentCrawler:
             self._log.warning("Authentication failed", error=str(e))
             return False
 
-    def _get_content_hash(self, page: BrowserContext) -> str:
+    async def _get_content_hash(self, context_id: str) -> str:
         """Get hash of page content for deduplication."""
         script = """
         (() => {
@@ -623,7 +625,7 @@ class IntelligentCrawler:
         })()
         """
 
-        content = page.expression(script)
+        content = await self._browser.evaluate(context_id=context_id, expression=script)
         return hashlib.md5(content.encode()).hexdigest()
 
     def _should_stop(self) -> bool:

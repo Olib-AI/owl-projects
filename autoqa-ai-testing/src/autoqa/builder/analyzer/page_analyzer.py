@@ -21,7 +21,7 @@ from urllib.parse import urlparse
 import structlog
 
 if TYPE_CHECKING:
-    from owl_browser import BrowserContext
+    from owl_browser import OwlBrowser
 
 logger = structlog.get_logger(__name__)
 
@@ -328,29 +328,32 @@ class PageAnalyzer:
         self.config = config or AnalyzerConfig()
         self._log = logger.bind(component="page_analyzer")
 
-    async def analyze(self, page: BrowserContext) -> PageAnalysisResult:
+    async def analyze(self, browser: "OwlBrowser", context_id: str) -> PageAnalysisResult:
         """
         Perform comprehensive page analysis.
 
         Args:
-            page: Browser context with loaded page
+            browser: OwlBrowser instance
+            context_id: Browser context identifier
 
         Returns:
             Complete page analysis result
         """
-        url = page.get_current_url()
-        title = page.get_title() or "Untitled"
+        page_info = await browser.get_page_info(context_id=context_id)
+        url = page_info.get("url", "")
+        title_result = await browser.evaluate(context_id=context_id, expression="document.title")
+        title = title_result or "Untitled"
 
         self._log.info("Starting page analysis", url=url)
 
         # Perform analyses in parallel where possible
-        dom_analysis = await self._analyze_dom(page)
-        components = await self._detect_components(page)
-        interactive_elements = await self._catalog_interactive_elements(page)
-        frames = await self._analyze_frames(page)
-        spa_info = await self._detect_spa(page)
-        meta_info = await self._extract_meta_info(page)
-        dynamic_regions = await self._detect_dynamic_regions(page)
+        dom_analysis = await self._analyze_dom(browser, context_id)
+        components = await self._detect_components(browser, context_id)
+        interactive_elements = await self._catalog_interactive_elements(browser, context_id)
+        frames = await self._analyze_frames(browser, context_id)
+        spa_info = await self._detect_spa(browser, context_id)
+        meta_info = await self._extract_meta_info(browser, context_id)
+        dynamic_regions = await self._detect_dynamic_regions(browser, context_id)
 
         result = PageAnalysisResult(
             url=url,
@@ -377,7 +380,7 @@ class PageAnalyzer:
 
         return result
 
-    async def _analyze_dom(self, page: BrowserContext) -> DOMAnalysis:
+    async def _analyze_dom(self, browser: "OwlBrowser", context_id: str) -> DOMAnalysis:
         """Analyze DOM structure and compute complexity metrics."""
         script = """
         (() => {
@@ -461,7 +464,7 @@ class PageAnalyzer:
         })()
         """
 
-        result = page.expression(script)
+        result = await browser.evaluate(context_id=context_id, expression=script)
 
         # Calculate complexity score (0-1)
         complexity_score = self._calculate_complexity_score(result)
@@ -529,7 +532,7 @@ class PageAnalyzer:
             return PageComplexity.COMPLEX
         return PageComplexity.HIGHLY_COMPLEX
 
-    async def _detect_components(self, page: BrowserContext) -> list[ComponentInfo]:
+    async def _detect_components(self, browser: "OwlBrowser", context_id: str) -> list[ComponentInfo]:
         """Detect UI components on the page."""
         components: list[ComponentInfo] = []
 
@@ -537,7 +540,7 @@ class PageAnalyzer:
             for selector in config["selectors"]:
                 try:
                     detected = await self._find_components(
-                        page, selector, component_type, config.get("indicators", [])
+                        browser, context_id, selector, component_type, config.get("indicators", [])
                     )
                     components.extend(detected)
                 except Exception as e:
@@ -559,7 +562,8 @@ class PageAnalyzer:
 
     async def _find_components(
         self,
-        page: BrowserContext,
+        browser: "OwlBrowser",
+        context_id: str,
         selector: str,
         component_type: ComponentType,
         indicators: list[str],
@@ -636,7 +640,7 @@ class PageAnalyzer:
         }})()
         """
 
-        raw_results = page.expression(script)
+        raw_results = await browser.evaluate(context_id=context_id, expression=script)
         components: list[ComponentInfo] = []
 
         for raw in raw_results:
@@ -664,7 +668,7 @@ class PageAnalyzer:
         return components
 
     async def _catalog_interactive_elements(
-        self, page: BrowserContext
+        self, browser: "OwlBrowser", context_id: str
     ) -> list[InteractiveElement]:
         """Catalog all interactive elements with context."""
         script = """
@@ -835,7 +839,7 @@ class PageAnalyzer:
         })()
         """
 
-        raw_elements = page.expression(script)
+        raw_elements = await browser.evaluate(context_id=context_id, expression=script)
         elements: list[InteractiveElement] = []
 
         for raw in raw_elements:
@@ -879,9 +883,10 @@ class PageAnalyzer:
 
         return elements
 
-    async def _analyze_frames(self, page: BrowserContext) -> list[FrameInfo]:
+    async def _analyze_frames(self, browser: "OwlBrowser", context_id: str) -> list[FrameInfo]:
         """Analyze iframes and frames."""
-        current_url = page.get_current_url()
+        page_info = await browser.get_page_info(context_id=context_id)
+        current_url = page_info.get("url", "")
         current_origin = urlparse(current_url).netloc
 
         script = """
@@ -919,7 +924,7 @@ class PageAnalyzer:
         })()
         """
 
-        raw_frames = page.expression(script)
+        raw_frames = await browser.evaluate(context_id=context_id, expression=script)
         frames: list[FrameInfo] = []
 
         for raw in raw_frames:
@@ -950,7 +955,7 @@ class PageAnalyzer:
 
         return frames
 
-    async def _detect_spa(self, page: BrowserContext) -> dict[str, Any]:
+    async def _detect_spa(self, browser: "OwlBrowser", context_id: str) -> dict[str, Any]:
         """Detect if page is a Single Page Application and identify framework."""
         script = """
         (() => {
@@ -1012,7 +1017,7 @@ class PageAnalyzer:
         })()
         """
 
-        result = page.expression(script)
+        result = await browser.evaluate(context_id=context_id, expression=script)
 
         return {
             "is_spa": result.get("isSPA", False),
@@ -1021,7 +1026,7 @@ class PageAnalyzer:
             "load_time": result.get("loadTime", 0),
         }
 
-    async def _extract_meta_info(self, page: BrowserContext) -> dict[str, str]:
+    async def _extract_meta_info(self, browser: "OwlBrowser", context_id: str) -> dict[str, str]:
         """Extract page meta information."""
         script = """
         (() => {
@@ -1059,9 +1064,9 @@ class PageAnalyzer:
         })()
         """
 
-        return page.expression(script)
+        return await browser.evaluate(context_id=context_id, expression=script)
 
-    async def _detect_dynamic_regions(self, page: BrowserContext) -> list[str]:
+    async def _detect_dynamic_regions(self, browser: "OwlBrowser", context_id: str) -> list[str]:
         """Detect regions with dynamic content (AJAX, WebSocket updates)."""
         script = """
         (() => {
@@ -1101,4 +1106,4 @@ class PageAnalyzer:
         })()
         """
 
-        return page.expression(script)
+        return await browser.evaluate(context_id=context_id, expression=script)

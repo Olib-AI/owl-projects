@@ -34,6 +34,9 @@ class PromptType(StrEnum):
     VISUAL_DESCRIPTION = "visual_description"
     CONTENT_ANALYSIS = "content_analysis"
 
+    # Vision prompts
+    VISION_PAGE_ANALYSIS = "vision_page_analysis"
+
     # Self-Healing prompts
     SELECTOR_RECOVERY = "selector_recovery"
     ELEMENT_IDENTIFICATION = "element_identification"

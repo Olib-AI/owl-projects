@@ -50,7 +50,7 @@ from autoqa.builder.generator import (
 
 
 if TYPE_CHECKING:
-    from owl_browser import Browser as BrowserController, BrowserContext
+    from owl_browser import OwlBrowser
 
 
 logger = structlog.get_logger(__name__)
@@ -193,13 +193,13 @@ class TestBuilderOrchestrator:
     
     def __init__(
         self,
-        browser: "BrowserController",
+        browser: "OwlBrowser",
         config: OrchestratorConfig | None = None,
         llm_service: Any | None = None,
     ) -> None:
         """
         Initialize orchestrator with browser and configuration.
-        
+
         Args:
             browser: Browser controller for page interactions
             config: Orchestrator configuration
@@ -209,8 +209,8 @@ class TestBuilderOrchestrator:
         self.config = config or OrchestratorConfig()
         self.llm_service = llm_service
 
-        # Page context for browser interactions (created per build)
-        self._page: "BrowserContext | None" = None
+        # Context ID for browser interactions (created per build)
+        self._context_id: str | None = None
 
         # Initialize components
         self._init_components()
@@ -293,8 +293,9 @@ class TestBuilderOrchestrator:
 
         result = BuildResult(success=False, tests=[], yaml_content="", output_path=None)
 
-        # Create page context for browser interactions
-        self._page = self.browser.new_page()
+        # Create browser context for interactions
+        ctx = await self.browser.create_context()
+        self._context_id = ctx["context_id"]
 
         try:
             # Phase 1: Crawl and discover pages
@@ -325,13 +326,13 @@ class TestBuilderOrchestrator:
             result.errors.append(f"Build failed: {str(e)}")
         
         finally:
-            # Clean up page context
-            if self._page:
+            # Clean up browser context
+            if self._context_id:
                 try:
-                    self._page.close()
+                    await self.browser.close_context(context_id=self._context_id)
                 except Exception:
                     pass
-                self._page = None
+                self._context_id = None
 
             result.completed_at = datetime.now()
             result.duration_seconds = (
@@ -509,13 +510,14 @@ class TestBuilderOrchestrator:
         else:
             # Standard/Deep mode: full crawl
             try:
-                # Navigate to start URL using page context
-                self._page.goto(start_url)
-                html = self._page.get_html()
+                # Navigate to start URL using browser context
+                await self.browser.navigate(context_id=self._context_id, url=start_url)
+                html = await self.browser.get_html(context_id=self._context_id)
 
                 # Capture initial state
                 await self.state_manager.capture_state(
-                    self._page,
+                    self.browser,
+                    self._context_id,
                     start_url,
                     html,
                 )
@@ -563,8 +565,8 @@ class TestBuilderOrchestrator:
             try:
                 # Fetch HTML if not available
                 if not html:
-                    self._page.goto(url)
-                    html = self._page.get_html()
+                    await self.browser.navigate(context_id=self._context_id, url=url)
+                    html = await self.browser.get_html(context_id=self._context_id)
                 
                 # Page analysis
                 page_analysis = await self.page_analyzer.analyze(html, url)
@@ -587,7 +589,7 @@ class TestBuilderOrchestrator:
                 visual_result = None
                 if self.config.enable_visual_analysis:
                     try:
-                        screenshot = await self.browser.screenshot()
+                        screenshot = await self.browser.screenshot(context_id=self._context_id)
                         visual_result = await self.visual_analyzer.analyze(
                             screenshot, html
                         )
@@ -665,8 +667,8 @@ class TestBuilderOrchestrator:
                         html = analysis.raw_html
                     else:
                         # Fetch if needed
-                        self._page.goto(url)
-                        html = self._page.get_html()
+                        await self.browser.navigate(context_id=self._context_id, url=url)
+                        html = await self.browser.get_html(context_id=self._context_id)
                     
                     flows = await self.flow_detector.detect_from_page(
                         html,
@@ -708,7 +710,7 @@ class TestBuilderOrchestrator:
                 for page_result in result.page_results[:10]:  # Limit
                     url = page_result["url"]
                     try:
-                        self._page.goto(url)
+                        await self.browser.navigate(context_id=self._context_id, url=url)
                         await asyncio.sleep(1)  # Wait for API calls
                     except Exception:
                         continue
@@ -741,8 +743,8 @@ class TestBuilderOrchestrator:
                     
                     # Get HTML
                     url = page_result["url"]
-                    self._page.goto(url)
-                    html = self._page.get_html()
+                    await self.browser.navigate(context_id=self._context_id, url=url)
+                    html = await self.browser.get_html(context_id=self._context_id)
                     
                     forms = await self.form_analyzer.analyze(html)
                     self._analyzed_forms.extend(forms)
@@ -962,7 +964,7 @@ class TestBuilderOrchestrator:
 
 # Convenience function for CLI/API usage
 async def build_tests(
-    browser: "BrowserController",
+    browser: "OwlBrowser",
     start_url: str,
     config: OrchestratorConfig | None = None,
     llm_service: Any | None = None,

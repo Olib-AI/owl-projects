@@ -68,10 +68,14 @@ class LLMAPIError(LLMClientError):
 
 @dataclass
 class ChatMessage:
-    """A single chat message."""
+    """A single chat message.
+
+    Content can be a simple string or a list of content parts for multimodal
+    messages (e.g., text + image for vision models).
+    """
 
     role: str  # "system", "user", "assistant"
-    content: str
+    content: str | list[dict[str, Any]]
 
 
 @dataclass
@@ -253,7 +257,17 @@ class LLMClient:
     def _estimate_tokens(self, messages: list[ChatMessage]) -> int:
         """Estimate token count for rate limiting."""
         # Rough estimation: ~4 chars per token
-        total_chars = sum(len(m.content) for m in messages)
+        total_chars = 0
+        for m in messages:
+            if isinstance(m.content, str):
+                total_chars += len(m.content)
+            else:
+                # Multimodal content: sum text parts + estimate for images
+                for part in m.content:
+                    if part.get("type") == "text":
+                        total_chars += len(part.get("text", ""))
+                    elif part.get("type") == "image_url":
+                        total_chars += 3000  # Rough estimate for image tokens
         return max(100, total_chars // 4 + self._endpoint.max_tokens)
 
     async def _execute_with_retry(

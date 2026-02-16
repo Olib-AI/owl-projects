@@ -20,7 +20,7 @@ from urllib.parse import parse_qs, urlparse
 import structlog
 
 if TYPE_CHECKING:
-    from owl_browser import BrowserContext
+    from owl_browser import OwlBrowser
 
 logger = structlog.get_logger(__name__)
 
@@ -190,7 +190,7 @@ class APIDetector:
         self._captured_requests: list[dict[str, Any]] = []
         self._endpoints: dict[str, APIEndpoint] = {}
 
-    async def start_capture(self, page: BrowserContext) -> None:
+    async def start_capture(self, browser: "OwlBrowser", context_id: str) -> None:
         """
         Start capturing network requests.
 
@@ -289,15 +289,15 @@ class APIDetector:
         };
         """
 
-        page.expression(script)
+        await browser.evaluate(context_id=context_id, expression=script)
 
-    async def stop_capture(self, page: BrowserContext) -> list[dict[str, Any]]:
+    async def stop_capture(self, browser: "OwlBrowser", context_id: str) -> list[dict[str, Any]]:
         """Stop capturing and return captured requests."""
         self._log.info("Stopping API capture")
 
         # Get captured requests
         script = "window.__capturedRequests || []"
-        self._captured_requests = page.expression(script)
+        self._captured_requests = await browser.evaluate(context_id=context_id, expression=script)
 
         # Restore original fetch
         restore_script = """
@@ -308,20 +308,22 @@ class APIDetector:
             window.XMLHttpRequest = window.__originalXHR;
         }
         """
-        page.expression(restore_script)
+        await browser.evaluate(context_id=context_id, expression=restore_script)
 
         return self._captured_requests
 
     async def detect_apis(
         self,
-        page: BrowserContext,
+        browser: "OwlBrowser",
+        context_id: str,
         captured_requests: list[dict[str, Any]] | None = None,
     ) -> APIDetectionResult:
         """
         Detect APIs from captured requests or page analysis.
 
         Args:
-            page: Browser context
+            browser: OwlBrowser instance
+            context_id: Browser context identifier
             captured_requests: Optional pre-captured requests
 
         Returns:

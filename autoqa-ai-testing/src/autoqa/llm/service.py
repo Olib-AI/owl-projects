@@ -27,6 +27,11 @@ from autoqa.llm.prompts import (
     get_prompt,
     get_prompt_config,
 )
+from autoqa.llm.vision import (
+    VisionAnalysisResult,
+    VisionAnalyzer,
+    is_vision_capable,
+)
 
 if TYPE_CHECKING:
     pass
@@ -533,6 +538,72 @@ class LLMService:
             return result.parsed_data
 
         return None
+
+    # =========================================================================
+    # Vision Methods
+    # =========================================================================
+
+    async def analyze_page_screenshot(
+        self,
+        screenshot_data: str | bytes,
+        enable_vision_override: bool = False,
+    ) -> VisionAnalysisResult | None:
+        """Analyze a page screenshot using a vision-capable LLM.
+
+        Checks all preconditions before attempting analysis:
+        1. LLM must be enabled for TEST_BUILDER tool
+        2. Vision must be enabled (in tool config or via override)
+        3. Model must be vision-capable
+
+        Args:
+            screenshot_data: Base64 string or raw bytes of a PNG screenshot.
+            enable_vision_override: CLI-level override to enable vision.
+
+        Returns:
+            VisionAnalysisResult on success, None on any failure or if
+            preconditions are not met.
+        """
+        tool = ToolName.TEST_BUILDER
+
+        if not self.is_enabled(tool):
+            self._log.debug("Vision analysis skipped: LLM not enabled for test_builder")
+            return None
+
+        tool_config = self._config.get_tool_config(tool)
+        if not tool_config.enable_vision and not enable_vision_override:
+            self._log.debug("Vision analysis skipped: vision not enabled")
+            return None
+
+        endpoint = self._config.get_effective_endpoint(tool)
+        if not is_vision_capable(endpoint):
+            self._log.warning(
+                "Vision analysis skipped: model not vision-capable",
+                model=endpoint.model,
+            )
+            return None
+
+        client = await self._get_client(tool)
+        if not client:
+            return None
+
+        try:
+            analyzer = VisionAnalyzer(client=client, endpoint=endpoint)
+            result = await analyzer.analyze_screenshot(screenshot_data)
+
+            if result.confidence > 0:
+                self._log.info(
+                    "Vision analysis succeeded",
+                    elements=len(result.detected_elements),
+                    confidence=result.confidence,
+                )
+                return result
+
+            self._log.debug("Vision analysis returned zero confidence")
+            return None
+
+        except Exception as e:
+            self._log.error("Vision analysis failed", error=str(e))
+            return None
 
     # =========================================================================
     # Lifecycle Methods

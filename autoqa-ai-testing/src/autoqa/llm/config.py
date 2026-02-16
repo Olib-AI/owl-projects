@@ -104,6 +104,22 @@ class LLMEndpointConfig(BaseModel):
         description="Azure OpenAI API version",
     )
 
+    # Vision capabilities
+    vision_capable: bool | None = Field(
+        default=None,
+        description="Whether the model supports vision/image input. None = auto-detect from model name.",
+    )
+    vision_max_image_size: int = Field(
+        default=2048,
+        ge=256,
+        le=4096,
+        description="Maximum image dimension for resizing before sending to vision model",
+    )
+    vision_detail: str = Field(
+        default="low",
+        description="Vision detail level: 'low' (fewer tokens, less detail) or 'high'",
+    )
+
     # Retry and rate limiting
     retry: RetryConfig = Field(default_factory=RetryConfig)
     rate_limit: RateLimitConfig = Field(default_factory=RateLimitConfig)
@@ -158,6 +174,10 @@ class ToolLLMConfig(BaseModel):
     custom_system_prompt: str | None = Field(
         default=None,
         description="Optional custom system prompt for this tool",
+    )
+    enable_vision: bool = Field(
+        default=False,
+        description="Whether to use vision model for this tool (requires vision-capable model)",
     )
 
 
@@ -273,6 +293,10 @@ class LLMSettings(BaseSettings):
     azure_deployment: str | None = None
     azure_api_version: str = "2024-02-15-preview"
 
+    # Vision settings from environment
+    vision_capable: bool | None = None
+    test_builder_vision: bool = False
+
     # Per-tool enable flags from environment
     test_builder_enabled: bool = False
     step_transformer_enabled: bool = False
@@ -307,11 +331,12 @@ class LLMSettings(BaseSettings):
             azure_api_version=file_config.get(
                 "azure_api_version", self.azure_api_version
             ),
+            vision_capable=file_config.get("vision_capable", self.vision_capable),
         )
 
         # Build tool configs
         def build_tool_config(
-            tool_name: str, env_enabled: bool
+            tool_name: str, env_enabled: bool, env_vision: bool = False,
         ) -> ToolLLMConfig:
             tool_file_config = file_config.get(tool_name, {})
             return ToolLLMConfig(
@@ -319,13 +344,15 @@ class LLMSettings(BaseSettings):
                 temperature_override=tool_file_config.get("temperature"),
                 max_tokens_override=tool_file_config.get("max_tokens"),
                 custom_system_prompt=tool_file_config.get("system_prompt"),
+                enable_vision=tool_file_config.get("enable_vision", env_vision),
             )
 
         return LLMConfig(
             enabled=file_config.get("enabled", self.enabled),
             default_endpoint=endpoint,
             test_builder=build_tool_config(
-                "test_builder", self.test_builder_enabled
+                "test_builder", self.test_builder_enabled,
+                env_vision=self.test_builder_vision,
             ),
             step_transformer=build_tool_config(
                 "step_transformer", self.step_transformer_enabled

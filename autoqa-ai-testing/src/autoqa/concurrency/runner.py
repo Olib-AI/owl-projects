@@ -28,8 +28,7 @@ from autoqa.runner.self_healing import SelfHealingEngine
 from autoqa.runner.test_runner import StepStatus, TestRunResult
 
 if TYPE_CHECKING:
-    from owl_browser import Browser
-    from owl_browser import BrowserContext as OwlBrowserContext
+    from owl_browser import OwlBrowser
 
 logger = structlog.get_logger(__name__)
 
@@ -140,7 +139,7 @@ class AsyncTestRunner:
 
     def __init__(
         self,
-        browser: Browser,
+        browser: OwlBrowser,
         config: ConcurrencyConfig | None = None,
         healing_engine: SelfHealingEngine | None = None,
         artifact_dir: str = "./artifacts",
@@ -503,8 +502,8 @@ class AsyncTestRunner:
 
         for attempt in range(ctx.max_retries + 1):
             try:
-                async with self._pool.acquire(ctx.spec.name, ctx.timeout_seconds) as page:
-                    result = await self._run_test_in_context(ctx, page)
+                async with self._pool.acquire(ctx.spec.name, ctx.timeout_seconds) as context_id:
+                    result = await self._run_test_in_context(ctx, context_id)
                     return result
 
             except Exception as e:
@@ -545,7 +544,7 @@ class AsyncTestRunner:
     async def _run_test_in_context(
         self,
         ctx: TestExecutionContext,
-        page: OwlBrowserContext,
+        context_id: str,
     ) -> TestRunResult:
         """
         Run test using existing TestRunner in a sync thread.
@@ -568,7 +567,7 @@ class AsyncTestRunner:
                 enable_versioning=self._enable_versioning,
                 versioning_storage_path=self._versioning_storage_path,
             )
-            return runner.run_spec(ctx.spec, page=page, variables=ctx.variables)
+            return runner.run_spec(ctx.spec, context_id=context_id, variables=ctx.variables)
 
         try:
             result = await asyncio.wait_for(
@@ -652,7 +651,7 @@ class ParallelCrawler:
 
     def __init__(
         self,
-        browser: Browser,
+        browser: OwlBrowser,
         config: ConcurrencyConfig | None = None,
         max_concurrent_pages: int = 5,
     ) -> None:
@@ -660,7 +659,7 @@ class ParallelCrawler:
         Initialize parallel crawler.
 
         Args:
-            browser: The owl-browser instance
+            browser: The OwlBrowser instance
             config: Concurrency configuration
             max_concurrent_pages: Maximum pages to crawl concurrently
         """
@@ -673,14 +672,14 @@ class ParallelCrawler:
     async def crawl_pages(
         self,
         urls: list[str],
-        crawler_func: Callable[[OwlBrowserContext, str], dict[str, Any]],
+        crawler_func: Callable[[str, str], dict[str, Any]],
     ) -> list[dict[str, Any]]:
         """
         Crawl multiple pages in parallel.
 
         Args:
             urls: URLs to crawl
-            crawler_func: Function to execute on each page
+            crawler_func: Function taking (context_id, url) to execute on each page
 
         Returns:
             List of results from each page
@@ -701,12 +700,12 @@ class ParallelCrawler:
                 if self._pool is None:
                     raise RuntimeError("Pool not initialized")
 
-                async with self._pool.acquire(url) as page:
+                async with self._pool.acquire(url) as context_id:
                     loop = asyncio.get_event_loop()
                     return await loop.run_in_executor(
                         None,
                         crawler_func,
-                        page,
+                        context_id,
                         url,
                     )
 

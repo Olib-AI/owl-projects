@@ -6,6 +6,7 @@ Provides generative testing through simulated user behaviors.
 
 from __future__ import annotations
 
+import asyncio
 import random
 import time
 from dataclasses import dataclass, field
@@ -16,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 import structlog
 
 if TYPE_CHECKING:
-    from owl_browser import Browser, BrowserContext
+    from owl_browser import OwlBrowser
 
 logger = structlog.get_logger(__name__)
 
@@ -87,19 +88,21 @@ class ChaosAgent:
 
     def __init__(
         self,
-        page: BrowserContext,
+        browser: OwlBrowser,
+        context_id: str,
         persona: ChaosPersona,
         max_actions: int = 100,
         action_delay_ms: int = 500,
     ) -> None:
-        self._page = page
+        self._browser = browser
+        self._context_id = context_id
         self._persona = persona
         self._max_actions = max_actions
         self._action_delay = action_delay_ms / 1000
         self._log = logger.bind(component="chaos_agent", persona=persona)
         self._session: ChaosSession | None = None
 
-    def run(self, duration_seconds: int = 60) -> ChaosSession:
+    async def run(self, duration_seconds: int = 60) -> ChaosSession:
         """
         Run chaos testing session.
 
@@ -126,7 +129,7 @@ class ChaosAgent:
         try:
             while time.monotonic() < end_time and action_count < self._max_actions:
                 action = self._generate_action()
-                result = self._execute_action(action)
+                result = await self._execute_action(action)
                 self._session.actions.append(result)
 
                 if not result.success:
@@ -134,10 +137,10 @@ class ChaosAgent:
                         f"{result.action_type}: {result.error}"
                     )
 
-                self._check_for_errors()
+                await self._check_for_errors()
 
                 action_count += 1
-                time.sleep(self._action_delay)
+                await asyncio.sleep(self._action_delay)
 
         except Exception as e:
             self._session.crashed = True
@@ -162,7 +165,7 @@ class ChaosAgent:
         """Generate next chaos action based on persona."""
         raise NotImplementedError
 
-    def _execute_action(self, action: ChaosAction) -> ChaosAction:
+    async def _execute_action(self, action: ChaosAction) -> ChaosAction:
         """Execute a chaos action."""
         start_time = time.monotonic()
 
@@ -170,55 +173,83 @@ class ChaosAgent:
             match action.action_type:
                 case ChaosActionType.CLICK:
                     if action.target:
-                        self._page.click(action.target)
+                        await self._browser.click(
+                            context_id=self._context_id, selector=action.target
+                        )
 
                 case ChaosActionType.TYPE:
                     if action.target and action.value:
-                        self._page.type(action.target, action.value)
+                        await self._browser.type(
+                            context_id=self._context_id,
+                            selector=action.target,
+                            text=action.value,
+                        )
 
                 case ChaosActionType.SCROLL:
                     scroll_amount = random.randint(-500, 500)
-                    self._page.scroll_by(0, scroll_amount)
+                    await self._browser.scroll_by(
+                        context_id=self._context_id, x=0, y=scroll_amount
+                    )
 
                 case ChaosActionType.NAVIGATE:
                     if action.value:
-                        self._page.goto(action.value)
+                        await self._browser.navigate(
+                            context_id=self._context_id, url=action.value
+                        )
 
                 case ChaosActionType.REFRESH:
-                    self._page.reload()
+                    await self._browser.evaluate(
+                        context_id=self._context_id,
+                        expression="location.reload()",
+                    )
 
                 case ChaosActionType.BACK:
-                    if self._page.can_go_back():
-                        self._page.go_back()
+                    await self._browser.evaluate(
+                        context_id=self._context_id,
+                        expression="history.back()",
+                    )
 
                 case ChaosActionType.FORWARD:
-                    if self._page.can_go_forward():
-                        self._page.go_forward()
+                    await self._browser.evaluate(
+                        context_id=self._context_id,
+                        expression="history.forward()",
+                    )
 
                 case ChaosActionType.RESIZE:
                     width = random.randint(320, 1920)
                     height = random.randint(480, 1080)
-                    self._page.set_viewport(width=width, height=height)
+                    await self._browser.set_viewport(
+                        context_id=self._context_id, width=width, height=height
+                    )
 
                 case ChaosActionType.RAPID_CLICK:
                     if action.target:
                         for _ in range(random.randint(3, 10)):
                             try:
-                                self._page.click(action.target)
+                                await self._browser.click(
+                                    context_id=self._context_id,
+                                    selector=action.target,
+                                )
                             except Exception:
                                 break
-                            time.sleep(0.05)
+                            await asyncio.sleep(0.05)
 
                 case ChaosActionType.FORM_SPAM:
-                    self._spam_forms()
+                    await self._spam_forms()
 
                 case ChaosActionType.INJECTION:
                     if action.target and action.value:
-                        self._page.type(action.target, action.value)
+                        await self._browser.type(
+                            context_id=self._context_id,
+                            selector=action.target,
+                            text=action.value,
+                        )
 
                 case ChaosActionType.KEYBOARD_SHORTCUT:
                     if action.value:
-                        self._page.press_key(action.value)
+                        await self._browser.press_key(
+                            context_id=self._context_id, key=action.value
+                        )
 
             action.success = True
 
@@ -229,7 +260,7 @@ class ChaosAgent:
         action.duration_ms = int((time.monotonic() - start_time) * 1000)
         return action
 
-    def _spam_forms(self) -> None:
+    async def _spam_forms(self) -> None:
         """Spam all visible form inputs with random data."""
         inputs = [
             "input[type='text']",
@@ -241,9 +272,17 @@ class ChaosAgent:
 
         for selector in inputs:
             try:
-                if self._page.is_visible(selector):
+                result = await self._browser.is_visible(
+                    context_id=self._context_id, selector=selector
+                )
+                is_visible = result if isinstance(result, bool) else bool(result)
+                if is_visible:
                     spam_value = self._generate_spam_value()
-                    self._page.type(selector, spam_value)
+                    await self._browser.type(
+                        context_id=self._context_id,
+                        selector=selector,
+                        text=spam_value,
+                    )
             except Exception:
                 pass
 
@@ -267,29 +306,43 @@ class ChaosAgent:
         ]
         return random.choice(options)
 
-    def _check_for_errors(self) -> None:
+    async def _check_for_errors(self) -> None:
         """Check page for JavaScript and network errors."""
         if self._session is None:
             return
 
         try:
-            console_logs = self._page.get_console_log()
+            console_logs = await self._browser.get_console_log(
+                context_id=self._context_id
+            )
+        except Exception:
+            console_logs = []
+
+        try:
             for log in console_logs:
                 if log.get("level") == "error":
                     error_msg = log.get("message", "Unknown error")
                     if error_msg not in self._session.console_errors:
                         self._session.console_errors.append(error_msg)
+        except Exception as e:
+            self._log.debug("Error processing console logs", error=str(e))
 
-            network_log = self._page.get_network_log()
+        try:
+            network_log = await self._browser.get_network_log(
+                context_id=self._context_id
+            )
+        except Exception:
+            network_log = []
+
+        try:
             for entry in network_log:
                 status = entry.get("status", 0)
                 if status >= 400:
                     error_msg = f"{status}: {entry.get('url', 'Unknown URL')}"
                     if error_msg not in self._session.network_errors:
                         self._session.network_errors.append(error_msg)
-
         except Exception as e:
-            self._log.debug("Error checking page errors", error=str(e))
+            self._log.debug("Error processing network log", error=str(e))
 
     def _find_clickable_elements(self) -> list[str]:
         """Find clickable elements on page."""
@@ -544,7 +597,8 @@ class ChaosAgentFactory:
     @classmethod
     def create(
         cls,
-        page: BrowserContext,
+        browser: OwlBrowser,
+        context_id: str,
         persona: ChaosPersona,
         max_actions: int = 100,
         action_delay_ms: int = 500,
@@ -553,7 +607,8 @@ class ChaosAgentFactory:
         Create a chaos agent with specified persona.
 
         Args:
-            page: Browser page to operate on
+            browser: OwlBrowser instance
+            context_id: Browser context identifier
             persona: Type of chaos persona
             max_actions: Maximum number of actions
             action_delay_ms: Delay between actions
@@ -564,23 +619,25 @@ class ChaosAgentFactory:
         agent_class = cls.AGENT_CLASSES.get(persona)
         if agent_class is None:
             return ChaosAgent(
-                page=page,
+                browser=browser,
+                context_id=context_id,
                 persona=persona,
                 max_actions=max_actions,
                 action_delay_ms=action_delay_ms,
             )
 
         return agent_class(
-            page=page,
+            browser=browser,
+            context_id=context_id,
             persona=persona,
             max_actions=max_actions,
             action_delay_ms=action_delay_ms,
         )
 
     @classmethod
-    def run_all_personas(
+    async def run_all_personas(
         cls,
-        browser: Browser,
+        browser: OwlBrowser,
         url: str,
         duration_per_persona: int = 30,
         max_actions: int = 50,
@@ -589,7 +646,7 @@ class ChaosAgentFactory:
         Run chaos testing with all personas.
 
         Args:
-            browser: Browser instance
+            browser: OwlBrowser instance
             url: URL to test
             duration_per_persona: Duration for each persona
             max_actions: Max actions per persona
@@ -601,13 +658,18 @@ class ChaosAgentFactory:
 
         for persona in ChaosPersona:
             if persona in cls.AGENT_CLASSES:
-                page = browser.new_page()
+                ctx = await browser.create_context()
+                context_id: str = ctx.get("context_id", ctx.get("id", ""))
                 try:
-                    page.goto(url)
-                    agent = cls.create(page, persona, max_actions=max_actions)
-                    session = agent.run(duration_seconds=duration_per_persona)
+                    await browser.navigate(context_id=context_id, url=url)
+                    agent = cls.create(
+                        browser, context_id, persona, max_actions=max_actions
+                    )
+                    session = await agent.run(
+                        duration_seconds=duration_per_persona
+                    )
                     results.append(session)
                 finally:
-                    page.close()
+                    await browser.close_context(context_id=context_id)
 
         return results
